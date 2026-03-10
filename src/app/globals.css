@@ -1,3 +1,7 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 :root {
     --bg-color: #f8fafc;
     --card-bg: #ffffff;
@@ -15,12 +19,6 @@
     --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
     --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
     --radius: 8px;
-}
-
-* {
-    box-sizing: border-box;
-    margin: 0;
-    padding: 0;
 }
 
 body {
@@ -90,7 +88,7 @@ h1 {
 }
 
 /* Main Container */
-.container {
+.container-custom {
     max-width: 1400px;
     margin: 2rem auto;
     padding: 0 1.5rem;
@@ -112,7 +110,7 @@ h1 {
 }
 
 /* Cards */
-.card {
+.card-custom {
     background: var(--card-bg);
     border-radius: var(--radius);
     box-shadow: var(--shadow-sm);
@@ -278,19 +276,4 @@ input:focus {
 .badge-pending {
     background-color: #fef3c7;
     color: #92400e;
-}
-
-/* Flash Messages */
-.flash-messages {
-    margin-bottom: 1.5rem;
-}
-
-.flash-alert {
-    background-color: #dbeafe;
-    color: #1e40af;
-    border: 1px solid #bfdbfe;
-    padding: 1rem 1.5rem;
-    border-radius: var(--radius);
-    margin-bottom: 0.5rem;
-    transition: opacity 0.3s ease;
 }
