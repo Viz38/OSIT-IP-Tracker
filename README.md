@@ -13,6 +13,20 @@ A standalone, lightweight Python web application to track the intelligence of co
 - **Minimalist UI:** Built with HTML/CSS and zero complex frontend frameworks.
 - **Local Database:** Uses SQLite so all your targets are saved automatically between restarts.
 
+## How It Works
+Detective Pradeep is designed as a standalone, lightweight OSINT intelligence tool. When a user requests data via the "Fetch Data" button, the Flask backend executes a synchronous sweep across the added domains.
+
+### Data Sources
+1. **IP Resolution:** It leverages Python's native `socket.gethostbyname()` module to parse the provided HTTP Domain and query the local system's DNS to retrieve the IPv4 Address.
+2. **Geolocation & Provider Specs:** The resolved IP is passed in a `GET` request to **ip-api.com** (a free IP geolocation API) to capture `City`, `Country`, and the associated Autonomous System (AS) Internet Service Provider (`org`/`isp`).
+3. **HTTP Status Context:** The application uses the `requests` library to actively probe the live HTTP/HTTPS status code. It handles timeouts, connection errors, and redirects gracefully to determine whether the remote host is alive.
+
+### Technology Stack
+- **Backend:** Python 3 + Flask framework
+- **Database:** SQLite (local `ips.db` file)
+- **Frontend:** Vanilla HTML5, semantic CSS variables, and Vanilla Javascript (ES6) for asynchronous fetch execution.
+- **Styling:** Custom "Detective Pradeep" CSS theme for a sleek, modern, and highly-responsive analytical table.
+
 ## Prerequisites
 - Python 3.7+
 
