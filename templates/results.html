@@ -1,0 +1,80 @@
+{% extends 'layout.html' %}
+
+{% block content %}
+<div class="page-header results-header">
+    <div>
+        <h1>IP Results</h1>
+        <p class="subtitle">Tracked IPs for all your registered targets.</p>
+    </div>
+    <div class="header-actions">
+        <a href="{{ url_for('export_csv') }}" class="btn btn-secondary">⬇️ Export CSV</a>
+        <button id="fetch-btn" class="btn btn-primary">🔄 Fetch IPs</button>
+    </div>
+</div>
+
+<div class="card table-card">
+    <table class="results-table">
+        <thead>
+            <tr>
+                <th>Company</th>
+                <th>Domain</th>
+                <th>IP Address</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for target in targets %}
+            <tr>
+                <td>{{ target.company }}</td>
+                <td class="mono">{{ target.domain }}</td>
+                <td>
+                    {% if target.ip_address == "Pending Fetch" %}
+                    <span class="badge badge-pending">Pending</span>
+                    {% elif target.ip_address == "Resolution Failed" %}
+                    <span class="badge badge-error">Failed</span>
+                    {% else %}
+                    <span class="badge badge-success mono">{{ target.ip_address }}</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="3" class="text-center no-data">No targets added yet. Go add some!</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<script>
+    document.getElementById('fetch-btn').addEventListener('click', function () {
+        const btn = this;
+        const originalText = btn.innerHTML;
+
+        btn.innerHTML = '⏳ Fetching...';
+        btn.disabled = true;
+
+        fetch('{{ url_for('fetch_ips') }}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    // Reload page to show new IPs
+                    window.location.reload();
+                } else {
+                    alert('Error fetching IPs');
+                    btn.innerHTML = originalText;
+                    btn.disabled = false;
+                }
+            })
+            .catch(err => {
+                alert('Network error occurred');
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+            });
+    });
+</script>
+{% endblock %}
