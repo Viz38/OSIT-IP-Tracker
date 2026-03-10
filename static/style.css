@@ -196,6 +196,16 @@ input:focus {
     background-color: var(--secondary-hover);
 }
 
+.btn-danger {
+    background-color: #fee2e2;
+    color: var(--danger);
+}
+
+.btn-danger:hover:not(:disabled) {
+    background-color: #fca5a5;
+    color: #991b1b;
+}
+
 .btn-block {
     width: 100%;
     display: block;

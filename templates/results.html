@@ -23,6 +23,7 @@
                 <th>Provider</th>
                 <th>Status</th>
                 <th>Last Fetched</th>
+                <th>Action</th>
             </tr>
         </thead>
         <tbody>
@@ -59,10 +60,14 @@
                     {% endif %}
                 </td>
                 <td class="mono" style="font-size: 0.75rem; color: var(--text-muted);">{{ target.last_fetched }}</td>
+                <td>
+                    <button class="btn btn-danger delete-btn" data-id="{{ target.id }}"
+                        style="padding: 0.25rem 0.5rem; font-size: 0.75rem;">🗑️ Delete</button>
+                </td>
             </tr>
             {% else %}
             <tr>
-                <td colspan="7" class="text-center no-data">No targets added yet. Go add some!</td>
+                <td colspan="8" class="text-center no-data">No targets added yet. Go add some!</td>
             </tr>
             {% endfor %}
         </tbody>
@@ -97,6 +102,41 @@
                 alert('Network error occurred (it might just be taking a long time depending on your target list). Reloading...');
                 window.location.reload(); // Still reload in case some finished
             });
+    });
+
+    document.querySelectorAll('.delete-btn').forEach(btn => {
+        btn.addEventListener('click', function () {
+            if (!confirm('Are you sure you want to delete this target?')) return;
+
+            const targetId = this.dataset.id;
+            const originalText = this.innerHTML;
+            this.innerHTML = '⏳';
+            this.disabled = true;
+
+            const deleteUrl = "{{ url_for('index') }}" + "delete/" + targetId;
+
+            fetch(deleteUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        window.location.reload();
+                    } else {
+                        alert('Error deleting target');
+                        this.innerHTML = originalText;
+                        this.disabled = false;
+                    }
+                })
+                .catch(err => {
+                    alert('Network error occurred');
+                    this.innerHTML = originalText;
+                    this.disabled = false;
+                });
+        });
     });
 </script>
 {% endblock %}
