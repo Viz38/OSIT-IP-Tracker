@@ -2,23 +2,41 @@
 
 {% block content %}
 <div class="page-header">
-    <h1>Add New Target</h1>
-    <p class="subtitle">Enter a company and its domain to track their IP resolution.</p>
+    <h1>Add New Targets</h1>
+    <p class="subtitle">Enter a company and its domain manually, or upload a CSV file in bulk.</p>
 </div>
 
-<div class="card form-card">
-    <form method="POST" action="{{ url_for('index') }}" class="target-form">
-        <div class="form-group">
-            <label for="company">Company Name</label>
-            <input type="text" id="company" name="company" placeholder="e.g., Acme Corp" required>
-        </div>
+<div style="display: flex; gap: 2rem; flex-wrap: wrap;">
+    <div class="card form-card" style="flex: 1; min-width: 300px; margin: 0;">
+        <h3 style="margin-bottom: 1rem;">Manual Entry</h3>
+        <form method="POST" action="{{ url_for('index') }}" class="target-form">
+            <div class="form-group">
+                <label for="company">Company Name</label>
+                <input type="text" id="company" name="company" placeholder="e.g., Acme Corp" required>
+            </div>
 
-        <div class="form-group">
-            <label for="domain">Domain</label>
-            <input type="text" id="domain" name="domain" placeholder="e.g., acme.com" required>
-        </div>
+            <div class="form-group">
+                <label for="domain">Domain</label>
+                <input type="text" id="domain" name="domain" placeholder="e.g., acme.com" required>
+            </div>
 
-        <button type="submit" class="btn btn-primary btn-block">Add Target</button>
-    </form>
+            <button type="submit" class="btn btn-primary btn-block">Add Target</button>
+        </form>
+    </div>
+
+    <div class="card form-card" style="flex: 1; min-width: 300px; margin: 0;">
+        <h3 style="margin-bottom: 1rem;">Bulk Upload CSV</h3>
+        <p class="subtitle" style="margin-bottom: 1rem;">Upload a CSV file containing two columns:
+            <strong>Company</strong> and <strong>Domain</strong>.</p>
+        <form method="POST" action="{{ url_for('upload_csv') }}" enctype="multipart/form-data" class="target-form">
+            <div class="form-group">
+                <label for="csv_file">Select CSV File</label>
+                <input type="file" id="csv_file" name="csv_file" accept=".csv" required
+                    style="padding: 0.5rem; background: var(--bg-color);">
+            </div>
+
+            <button type="submit" class="btn btn-secondary btn-block">Upload Targets</button>
+        </form>
+    </div>
 </div>
 {% endblock %}

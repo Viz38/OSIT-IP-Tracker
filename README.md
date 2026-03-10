@@ -1,11 +1,15 @@
-# IP Tracker
+# Detective Pradeep 🕵️
+**(Formerly OSIT-IP-Tracker)**
 
-A standalone, lightweight Python web application to track the IP addresses of companies by resolving their domain names. Includes a sleek, modern UI to manage targets and export results to CSV.
+A standalone, lightweight Python web application to track the intelligence of companies by resolving their domain names. Includes a sleek, modern UI to manage targets, fetch advanced intel, and export results to CSV.
 
 ## Features
-- **Add Targets:** Easily input a company name and its domain.
-- **Fetch IPs:** Resolves all pending domains to their corresponding IP addresses with a single click.
-- **Export Data:** Download all tracked domains and IPs into a structured CSV file.
+- **Add Targets:** Easily input a company name and its domain manually.
+- **Bulk Upload:** Upload tens or hundreds of targets simultaneously via a simple CSV file structure.
+- **Fetch Intel:** Resolves all pending domains to their corresponding IP addresses automatically.
+- **Geolocation & Infrastructure Tracking:** Powered by `ip-api.com`; immediately find out where the server is located and who owns it (e.g., AWS, Cloudflare, etc.).
+- **Live HTTP Status:** Instantly see if a website is online or not by pinging its live HTTP status code (200, 403, 500, Offline, etc) displayed via colored badges.
+- **Export Data:** Download all tracked domains, statuses, regions, and IPs into a structured CSV file.
 - **Minimalist UI:** Built with HTML/CSS and zero complex frontend frameworks.
 - **Local Database:** Uses SQLite so all your targets are saved automatically between restarts.
 
@@ -18,7 +22,7 @@ A standalone, lightweight Python web application to track the IP addresses of co
    ```bash
    cd "IP Tracker"
    ```
-3. Install the required dependency (Flask):
+3. Install the required dependencies:
    ```bash
    pip install -r requirements.txt
    ```
@@ -34,6 +38,6 @@ A standalone, lightweight Python web application to track the IP addresses of co
    ```
 
 ## Usage Instructions
-1. **Adding Targets:** On the home page (`/`), fill in the "Company Name" and "Domain" fields, then click "Add Target". 
-2. **Fetching IPs:** Navigate to the "View Results" page. Any newly added domains will be marked as *Pending*. Click the blue **"🔄 Fetch IPs"** button in the top right. The server will resolve all pending domains.
+1. **Adding Targets:** On the home page (`/`), fill in the "Company Name" and "Domain" fields, then click "Add Target". Alternatively, drop a CSV into the bulk uploader form.
+2. **Fetching IPs:** Navigate to the "View Results" page. Any newly added domains will be marked as *Pending*. Click the blue **"🔄 Fetch Data"** button in the top right. The server will resolve all pending domains, pull geolocations, and verify the websites are alive.
 3. **Exporting:** On the "View Results" page, click the **"⬇️ Export CSV"** button to download a file containing all your tracking data.
