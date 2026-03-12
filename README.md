@@ -1,5 +1,5 @@
 # Tracxn OSIT 🕵️
-**(Advanced IP Intelligence & Consensus Tracker)**
+**(Advanced OSIT Intelligence & Consensus Tracker)**
 
 A powerful, standalone Python web application designed for high-accuracy IP reconnaissance and corporate intelligence. It uses a **Triple-Source Consensus Engine** to map IP addresses to their **Legal Company Identity**, **Corporate Headquarters**, **Network Type**, and **Passive DNS** with over 90% accuracy.
 
