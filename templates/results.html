@@ -3,12 +3,12 @@
 {% block content %}
 <div class="page-header results-header">
     <div>
-        <h1>Detective Pradeep Results</h1>
-        <p class="subtitle">Tracked intel for all your registered targets.</p>
+        <h1>IP Intel Results</h1>
+        <p class="subtitle">Company, location, type and passive DNS domains for your IP list.</p>
     </div>
     <div class="header-actions">
         <a href="{{ url_for('export_csv') }}" class="btn btn-secondary">⬇️ Export CSV</a>
-        <button id="fetch-btn" class="btn btn-primary">🔄 Fetch Data</button>
+        <button id="fetch-btn" class="btn btn-primary">🔄 Fetch Intel</button>
     </div>
 </div>
 
@@ -17,11 +17,11 @@
         <thead>
             <tr>
                 <th>Company</th>
-                <th>Domain</th>
                 <th>IP Address</th>
+                <th>Type</th>
+                <th>Associated Domains</th>
                 <th>Location</th>
-                <th>Provider</th>
-                <th>Status</th>
+                <th>AS / Provider</th>
                 <th>Last Fetched</th>
                 <th>Action</th>
             </tr>
@@ -29,36 +29,40 @@
         <tbody>
             {% for target in targets %}
             <tr>
-                <td>{{ target.company }}</td>
-                <td class="mono"><a href="http://{{ target.domain }}" target="_blank"
-                        style="color: var(--primary); text-decoration: none; font-weight: 500;">{{ target.domain }}</a>
+                <td style="font-weight: 500;">
+                    {% if target.company == "Pending" %}
+                    <span class="badge badge-pending">Pending</span>
+                    {% else %}
+                    {{ target.company }}
+                    {% endif %}
+                </td>
+                <td class="mono">
+                    <span class="badge badge-success mono">{{ target.ip_address }}</span>
                 </td>
                 <td>
-                    {% if target.ip_address == "Pending Fetch" %}
+                    {% if target.ip_type == "Pending" %}
                     <span class="badge badge-pending">Pending</span>
-                    {% elif target.ip_address == "Resolution Failed" %}
-                    <span class="badge badge-error">Failed</span>
+                    {% elif target.ip_type == "Cloud/Hosting" %}
+                    <span class="badge" style="background-color: #e0e7ff; color: #3730a3;">Cloud</span>
+                    {% elif target.ip_type == "VPN/Proxy" %}
+                    <span class="badge badge-error">VPN/Proxy</span>
                     {% else %}
-                    <span class="badge badge-success mono">{{ target.ip_address }}</span>
+                    <span class="badge" style="background-color: #f3f4f6; color: #374151;">{{ target.ip_type }}</span>
+                    {% endif %}
+                </td>
+                <td class="mono" style="font-size: 0.8rem; max-width: 250px;">
+                    {% if target.domains_associated == "Pending Fetch" %}
+                    <span class="badge badge-pending">Pending</span>
+                    {% else %}
+                    <div title="{{ target.domains_associated }}" style="white-space: normal; line-height: 1.2;">
+                        {{ target.domains_associated }}
+                    </div>
                     {% endif %}
                 </td>
                 <td class="mono" style="font-size: 0.8rem;">{{ target.location }}</td>
                 <td class="mono"
                     style="font-size: 0.8rem; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
                     title="{{ target.provider }}">{{ target.provider }}</td>
-                <td>
-                    {% if target.status_code == "Pending" %}
-                    <span class="badge badge-pending">Pending</span>
-                    {% elif target.status_code == "Offline" or target.status_code == "Timeout" or target.status_code ==
-                    "Error" %}
-                    <span class="badge badge-error">{{ target.status_code }}</span>
-                    {% elif target.status_code.startswith('2') %}
-                    <span class="badge badge-success">{{ target.status_code }}</span>
-                    {% else %}
-                    <span class="badge" style="background-color: #fef08a; color: #854d0e;">{{ target.status_code
-                        }}</span>
-                    {% endif %}
-                </td>
                 <td class="mono" style="font-size: 0.75rem; color: var(--text-muted);">{{ target.last_fetched }}</td>
                 <td>
                     <button class="btn btn-danger delete-btn" data-id="{{ target.id }}"
@@ -67,7 +71,7 @@
             </tr>
             {% else %}
             <tr>
-                <td colspan="8" class="text-center no-data">No targets added yet. Go add some!</td>
+                <td colspan="8" class="text-center no-data">No IPs added yet. Go add some!</td>
             </tr>
             {% endfor %}
         </tbody>
@@ -99,8 +103,8 @@
                 }
             })
             .catch(err => {
-                alert('Network error occurred (it might just be taking a long time depending on your target list). Reloading...');
-                window.location.reload(); // Still reload in case some finished
+                alert('Network error occurred. Reloading...');
+                window.location.reload();
             });
     });
 
@@ -113,9 +117,7 @@
             this.innerHTML = '⏳';
             this.disabled = true;
 
-            const deleteUrl = "{{ url_for('index') }}" + "delete/" + targetId;
-
-            fetch(deleteUrl, {
+            fetch('/delete/' + targetId, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'

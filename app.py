@@ -17,12 +17,12 @@ def init_db():
     c.execute('''
         CREATE TABLE IF NOT EXISTS targets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            company TEXT NOT NULL,
-            domain TEXT NOT NULL UNIQUE,
-            ip_address TEXT,
+            company TEXT,
+            ip_address TEXT NOT NULL UNIQUE,
             location TEXT,
             provider TEXT,
-            status_code TEXT,
+            domains_associated TEXT,
+            ip_type TEXT,
             last_fetched TEXT
         )
     ''')
@@ -34,71 +34,83 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
-def check_target(domain):
+def check_target(ip):
     result = {
-        "ip_address": "Resolution Failed",
+        "company": "Unknown",
         "location": "N/A",
         "provider": "N/A",
-        "status_code": "N/A",
+        "domains_associated": "N/A",
+        "ip_type": "Business/Static",
         "last_fetched": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }
     
-    # 1. Resolve IP
+    # 1. Reverse IP Lookup (Passive DNS) - Much more accurate than basic PTR
     try:
-        ip = socket.gethostbyname(domain)
-        result["ip_address"] = ip
+        # Using HackerTarget's free API for Reverse IP
+        # Note: This is rate-limited but provides a list of domains
+        ht_req = requests.get(f"https://api.hackertarget.com/reverseiplookup/?q={ip}", timeout=5)
+        if ht_req.status_code == 200 and "error" not in ht_req.text.lower() and "no records" not in ht_req.text.lower():
+            domains = ht_req.text.strip().split("\n")
+            if len(domains) > 10:
+                result["domains_associated"] = f"{', '.join(domains[:10])} (+{len(domains)-10} more)"
+            else:
+                result["domains_associated"] = ", ".join(domains)
+        else:
+            # Fallback to basic PTR
+            try:
+                host, alias, _ = socket.gethostbyaddr(ip)
+                result["domains_associated"] = ", ".join([host] + alias)
+            except:
+                result["domains_associated"] = "No associated domains found"
+    except Exception as e:
+        result["domains_associated"] = "Lookup failed"
         
-        # 2. Get Geolocation and Provider
-        try:
-            geo_req = requests.get(f"http://ip-api.com/json/{ip}", timeout=3)
-            if geo_req.status_code == 200:
-                geo_data = geo_req.json()
-                if geo_data.get("status") == "success":
-                    country = geo_data.get("country", "Unknown")
-                    city = geo_data.get("city", "Unknown")
-                    result["location"] = f"{city}, {country}"
-                    result["provider"] = geo_data.get("org") or geo_data.get("isp", "Unknown")
-        except:
-            pass
-            
-    except Exception:
+    # 2. Get Geolocation and Provider/Company
+    try:
+        geo_req = requests.get(f"http://ip-api.com/json/{ip}?fields=status,message,country,city,org,as,isp,mobile,proxy,hosting", timeout=3)
+        if geo_req.status_code == 200:
+            geo_data = geo_req.json()
+            if geo_data.get("status") == "success":
+                country = geo_data.get("country", "Unknown")
+                city = geo_data.get("city", "Unknown")
+                result["location"] = f"{city}, {country}"
+                
+                # Company identification
+                result["company"] = geo_data.get("org") or geo_data.get("isp", "Unknown")
+                result["provider"] = geo_data.get("as") or "Unknown"
+                
+                # Determine IP Type
+                if geo_data.get("hosting"):
+                    result["ip_type"] = "Cloud/Hosting"
+                elif geo_data.get("proxy"):
+                    result["ip_type"] = "VPN/Proxy"
+                elif geo_data.get("mobile"):
+                    result["ip_type"] = "Mobile Network"
+                else:
+                    result["ip_type"] = "Business/Residential"
+                    
+    except:
         pass
-        
-    # 3. Check HTTP Status
-    try:
-        http_req = requests.get(f"http://{domain}", timeout=3, allow_redirects=True)
-        result["status_code"] = str(http_req.status_code)
-    except requests.exceptions.Timeout:
-        result["status_code"] = "Timeout"
-    except requests.exceptions.ConnectionError:
-        try:
-            https_req = requests.get(f"https://{domain}", timeout=3, allow_redirects=True)
-            result["status_code"] = str(https_req.status_code)
-        except:
-            result["status_code"] = "Offline"
-    except Exception:
-        result["status_code"] = "Error"
         
     return result
 
 @app.route('/', methods=('GET', 'POST'))
 def index():
     if request.method == 'POST':
-        company = request.form['company'].strip()
-        domain = request.form['domain'].strip()
+        ip_address = request.form['ip_address'].strip()
 
-        if not company or not domain:
-            flash('Company and Domain are required!')
+        if not ip_address:
+            flash('IP Address is required!')
         else:
             conn = get_db_connection()
             try:
-                conn.execute('INSERT INTO targets (company, domain, ip_address, location, provider, status_code, last_fetched) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                             (company, domain, "Pending Fetch", "Pending", "Pending", "Pending", "Never"))
+                conn.execute('INSERT INTO targets (company, ip_address, location, provider, domains_associated, ip_type, last_fetched) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                             ("Pending", ip_address, "Pending", "Pending", "Pending Fetch", "Pending", "Never"))
                 conn.commit()
-                flash('Target successfully added!')
+                flash('IP successfully added!')
                 return redirect(url_for('results'))
             except sqlite3.IntegrityError:
-                flash('This domain already exists in the tracker.')
+                flash('This IP address already exists in the tracker.')
             finally:
                 conn.close()
 
@@ -119,33 +131,27 @@ def upload_csv():
         stream = io.StringIO(file.stream.read().decode("UTF8"), newline=None)
         csv_input = csv.reader(stream)
         
-        # Skip header if present
-        header_skipped = False
-        
         conn = get_db_connection()
         added_count = 0
         duplicate_count = 0
         
         for row in csv_input:
-            if not header_skipped and row and row[0].lower() in ['company', 'name']:
-                header_skipped = True
+            if not row: continue
+            ip_address = row[0].strip()
+            if ip_address.lower() in ['ip', 'ip_address', 'address'] or not ip_address:
                 continue
-                
-            if len(row) >= 2:
-                company = row[0].strip()
-                domain = row[1].strip()
-                if company and domain:
-                    try:
-                        conn.execute('INSERT INTO targets (company, domain, ip_address, location, provider, status_code, last_fetched) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                                     (company, domain, "Pending Fetch", "Pending", "Pending", "Pending", "Never"))
-                        added_count += 1
-                    except sqlite3.IntegrityError:
-                        duplicate_count += 1
+
+            try:
+                conn.execute('INSERT INTO targets (company, ip_address, location, provider, domains_associated, ip_type, last_fetched) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                             ("Pending", ip_address, "Pending", "Pending", "Pending Fetch", "Pending", "Never"))
+                added_count += 1
+            except sqlite3.IntegrityError:
+                duplicate_count += 1
                         
         conn.commit()
         conn.close()
         
-        flash(f'Successfully added {added_count} targets from CSV! ({duplicate_count} duplicates skipped)')
+        flash(f'Successfully added {added_count} IPs from CSV!')
         return redirect(url_for('results'))
     else:
         flash('Invalid file format. Please upload a .csv file')
@@ -154,23 +160,23 @@ def upload_csv():
 @app.route('/results')
 def results():
     conn = get_db_connection()
-    targets = conn.execute('SELECT * FROM targets ORDER BY company ASC').fetchall()
+    targets = conn.execute('SELECT * FROM targets ORDER BY last_fetched DESC').fetchall()
     conn.close()
     return render_template('results.html', targets=targets)
 
 @app.route('/fetch', methods=['POST'])
 def fetch_ips():
     conn = get_db_connection()
-    targets = conn.execute('SELECT id, domain FROM targets').fetchall()
+    targets = conn.execute('SELECT id, ip_address FROM targets').fetchall()
     
     updated_count = 0
     for target in targets:
-        res = check_target(target['domain'])
+        res = check_target(target['ip_address'])
         conn.execute('''
             UPDATE targets 
-            SET ip_address = ?, location = ?, provider = ?, status_code = ?, last_fetched = ? 
+            SET company = ?, location = ?, provider = ?, domains_associated = ?, ip_type = ?, last_fetched = ? 
             WHERE id = ?''', 
-            (res['ip_address'], res['location'], res['provider'], res['status_code'], res['last_fetched'], target['id'])
+            (res['company'], res['location'], res['provider'], res['domains_associated'], res['ip_type'], res['last_fetched'], target['id'])
         )
         updated_count += 1
         
@@ -179,23 +185,31 @@ def fetch_ips():
     
     return jsonify({"status": "success", "message": f"Successfully updated {updated_count} records."})
 
+@app.route('/delete/<int:id>', methods=['POST'])
+def delete_target(id):
+    conn = get_db_connection()
+    conn.execute('DELETE FROM targets WHERE id = ?', (id,))
+    conn.commit()
+    conn.close()
+    return jsonify({"status": "success", "message": "Target deleted."})
+
 @app.route('/export')
 def export_csv():
     conn = get_db_connection()
-    targets = conn.execute('SELECT * FROM targets ORDER BY company ASC').fetchall()
+    targets = conn.execute('SELECT * FROM targets ORDER BY last_fetched DESC').fetchall()
     conn.close()
 
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(['Company', 'Domain', 'IP Address', 'Location', 'Provider', 'HTTP Status', 'Last Fetched'])
+    writer.writerow(['Company', 'IP Address', 'Type', 'Domains', 'Location', 'AS/Provider', 'Last Fetched'])
     
     for row in targets:
-        writer.writerow([row['company'], row['domain'], row['ip_address'], row['location'], row['provider'], row['status_code'], row['last_fetched']])
+        writer.writerow([row['company'], row['ip_address'], row['ip_type'], row['domains_associated'], row['location'], row['provider'], row['last_fetched']])
         
     return Response(
         output.getvalue(),
         mimetype="text/csv",
-        headers={"Content-disposition": "attachment; filename=detective_pradeep_results.csv"}
+        headers={"Content-disposition": "attachment; filename=detective_pradeep_intel_results.csv"}
     )
 
 if __name__ == '__main__':
