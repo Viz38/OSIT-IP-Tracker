@@ -33,6 +33,7 @@ def init_db():
             registered_on TEXT,
             expires_on TEXT,
             last_updated_on TEXT,
+            raw_intel TEXT,
             last_fetched TEXT
         )
     ''')
@@ -63,9 +64,9 @@ def resolve_domain(target):
             return None, target
 
 def get_domain_whois(domain_name):
-    """Fetch Domain WHOIS dates (Registered, Expires, Updated)"""
+    """Fetch full Domain WHOIS data"""
     if not domain_name:
-        return "N/A", "N/A", "N/A"
+        return "N/A", "N/A", "N/A", {}
     
     try:
         w = whois.whois(domain_name)
@@ -81,9 +82,16 @@ def get_domain_whois(domain_name):
         expires = format_date(w.expiration_date) if w.expiration_date else "N/A"
         updated = format_date(w.updated_date) if w.updated_date else "N/A"
         
-        return registered, expires, updated
+        raw_data = {
+            "Registrar": w.registrar if w.registrar else "N/A",
+            "Name Servers": ", ".join(w.name_servers) if isinstance(w.name_servers, list) else (w.name_servers or "N/A"),
+            "Emails": ", ".join(w.emails) if isinstance(w.emails, list) else (w.emails or "N/A"),
+            "Status": ", ".join(w.status) if isinstance(w.status, list) else (w.status or "N/A")
+        }
+        
+        return registered, expires, updated, raw_data
     except:
-        return "N/A", "N/A", "N/A"
+        return "N/A", "N/A", "N/A", {}
 
 def query_wikidata(company_name):
     """Fetch corporate HQ from Wikidata"""
@@ -119,21 +127,30 @@ def check_target(ip, domain=None):
         "registered_on": "N/A",
         "expires_on": "N/A",
         "last_updated_on": "N/A",
+        "raw_intel": "{}",
         "last_fetched": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    }
+
+    raw_intel_dict = {
+        "WHOIS": {},
+        "Network (ip-api)": {},
+        "Infrastructure (RDAP)": {},
+        "Interconnection (PeeringDB)": {}
     }
 
     agreement_points = 0
 
-    # Domain WHOIS Dates
+    # Domain WHOIS
     if domain:
-        reg, exp, upd = get_domain_whois(domain)
+        reg, exp, upd, whois_raw = get_domain_whois(domain)
         result["registered_on"] = reg
         result["expires_on"] = exp
         result["last_updated_on"] = upd
+        raw_intel_dict["WHOIS"] = whois_raw
 
     # Source 1: ip-api.com
     try:
-        geo_req = requests.get(f"http://ip-api.com/json/{ip}?fields=status,country,city,org,as,isp,hosting,proxy", timeout=3)
+        geo_req = requests.get(f"http://ip-api.com/json/{ip}?fields=status,country,regionName,city,zip,lat,lon,timezone,org,as,isp,hosting,proxy", timeout=3)
         if geo_req.status_code == 200:
             geo_data = geo_req.json()
             if geo_data.get("status") == "success":
@@ -142,6 +159,15 @@ def check_target(ip, domain=None):
                 result["provider"] = geo_data.get("as") or "Unknown"
                 result["ip_type"] = "Cloud" if geo_data.get("hosting") else "VPN" if geo_data.get("proxy") else "Business/Residential"
                 agreement_points += 1
+                
+                raw_intel_dict["Network (ip-api)"] = {
+                    "Region": geo_data.get("regionName", "N/A"),
+                    "ZIP Code": geo_data.get("zip", "N/A"),
+                    "Coordinates": f"{geo_data.get('lat', 'N/A')}, {geo_data.get('lon', 'N/A')}",
+                    "Timezone": geo_data.get("timezone", "N/A"),
+                    "Is Hosting/Cloud": geo_data.get("hosting", False),
+                    "Is Proxy/VPN": geo_data.get("proxy", False)
+                }
     except:
         pass
 
@@ -165,23 +191,39 @@ def check_target(ip, domain=None):
             else:
                 result["company"] = rdap_org
             result["legal_name"] = rdap_org
+
+        raw_intel_dict["Infrastructure (RDAP)"] = {
+            "CIDR Block": rdap.get('network', {}).get('cidr', 'N/A'),
+            "Start Address": rdap.get('network', {}).get('start_address', 'N/A'),
+            "End Address": rdap.get('network', {}).get('end_address', 'N/A'),
+            "ASN Registry": rdap.get('asn_registry', 'N/A'),
+            "ASN CIDR": rdap.get('asn_cidr', 'N/A'),
+            "Network Country": rdap.get('network', {}).get('country', 'N/A')
+        }
     except:
         pass
 
-    # Source 3: Wikidata
+    # Source 3: Wikidata / PeeringDB
     if result["company"] != "Unknown":
         hq = query_wikidata(result["company"])
         if hq:
             result["corporate_hq"] = hq
             agreement_points += 1
+            raw_intel_dict["Interconnection (PeeringDB)"]["Note"] = "Legal HQ verified via Wikidata"
         else:
             try:
                 pdb_req = requests.get(f"https://www.peeringdb.com/api/net?name__contains={result['company']}", timeout=3)
                 if pdb_req.status_code == 200:
                     data = pdb_req.json().get('data', [])
                     if data:
-                        result["corporate_hq"] = f"{data[0].get('city')}, {data[0].get('country')}"
+                        match = data[0]
+                        result["corporate_hq"] = f"{match.get('city')}, {match.get('country')}"
                         agreement_points += 1
+                        raw_intel_dict["Interconnection (PeeringDB)"] = {
+                            "Website": match.get('website', 'N/A'),
+                            "Network Type": match.get('info_type', 'N/A'),
+                            "Traffic Info": match.get('info_traffic', 'N/A')
+                        }
             except:
                 pass
 
@@ -199,6 +241,7 @@ def check_target(ip, domain=None):
     elif agreement_points == 1: result["confidence_score"] = 75
     else: result["confidence_score"] = 20
 
+    result["raw_intel"] = json.dumps(raw_intel_dict)
     return result
 
 @app.route('/', methods=('GET', 'POST'))
@@ -215,9 +258,9 @@ def index():
                 conn = get_db_connection()
                 try:
                     conn.execute('''
-                        INSERT INTO targets (domain, company, legal_name, corporate_hq, ip_address, location, provider, domains_associated, ip_type, confidence_score, registered_on, expires_on, last_updated_on, last_fetched) 
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                        (domain, "Pending", "Pending", "Pending", ip_address, "Pending", "Pending", "Pending Fetch", "Pending", 0, "Pending", "Pending", "Pending", "Never")
+                        INSERT INTO targets (domain, company, legal_name, corporate_hq, ip_address, location, provider, domains_associated, ip_type, confidence_score, registered_on, expires_on, last_updated_on, raw_intel, last_fetched) 
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                        (domain, "Pending", "Pending", "Pending", ip_address, "Pending", "Pending", "Pending Fetch", "Pending", 0, "Pending", "Pending", "Pending", "{}", "Never")
                     )
                     conn.commit()
                     flash(f'Target successfully added: {ip_address}')
@@ -251,9 +294,9 @@ def upload_csv():
             if ip_address:
                 try:
                     conn.execute('''
-                        INSERT INTO targets (domain, company, legal_name, corporate_hq, ip_address, location, provider, domains_associated, ip_type, confidence_score, registered_on, expires_on, last_updated_on, last_fetched) 
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                        (domain, "Pending", "Pending", "Pending", ip_address, "Pending", "Pending", "Pending Fetch", "Pending", 0, "Pending", "Pending", "Pending", "Never")
+                        INSERT INTO targets (domain, company, legal_name, corporate_hq, ip_address, location, provider, domains_associated, ip_type, confidence_score, registered_on, expires_on, last_updated_on, raw_intel, last_fetched) 
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                        (domain, "Pending", "Pending", "Pending", ip_address, "Pending", "Pending", "Pending Fetch", "Pending", 0, "Pending", "Pending", "Pending", "{}", "Never")
                     )
                     added_count += 1
                 except:
@@ -279,9 +322,9 @@ def fetch_ips():
         res = check_target(target['ip_address'], target['domain'])
         conn.execute('''
             UPDATE targets 
-            SET company = ?, legal_name = ?, corporate_hq = ?, location = ?, provider = ?, domains_associated = ?, ip_type = ?, confidence_score = ?, registered_on = ?, expires_on = ?, last_updated_on = ?, last_fetched = ? 
+            SET company = ?, legal_name = ?, corporate_hq = ?, location = ?, provider = ?, domains_associated = ?, ip_type = ?, confidence_score = ?, registered_on = ?, expires_on = ?, last_updated_on = ?, raw_intel = ?, last_fetched = ? 
             WHERE id = ?''', 
-            (res['company'], res['legal_name'], res['corporate_hq'], res['location'], res['provider'], res['domains_associated'], res['ip_type'], res['confidence_score'], res['registered_on'], res['expires_on'], res['last_updated_on'], res['last_fetched'], target['id'])
+            (res['company'], res['legal_name'], res['corporate_hq'], res['location'], res['provider'], res['domains_associated'], res['ip_type'], res['confidence_score'], res['registered_on'], res['expires_on'], res['last_updated_on'], res['raw_intel'], res['last_fetched'], target['id'])
         )
     conn.commit()
     conn.close()
@@ -302,9 +345,9 @@ def export_csv():
     conn.close()
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(['Domain', 'Company', 'IP Address', 'Confidence', 'Corporate HQ', 'Registered On', 'Expires On', 'Last Updated', 'Server Location', 'Type', 'Domains'])
+    writer.writerow(['Domain', 'Company', 'IP Address', 'Confidence', 'Corporate HQ', 'Registered On', 'Expires On', 'Last Updated', 'Server Location', 'Type', 'Domains', 'Raw Intel JSON'])
     for row in targets:
-        writer.writerow([row['domain'], row['company'], row['ip_address'], f"{row['confidence_score']}%", row['corporate_hq'], row['registered_on'], row['expires_on'], row['last_updated_on'], row['location'], row['ip_type'], row['domains_associated']])
+        writer.writerow([row['domain'], row['company'], row['ip_address'], f"{row['confidence_score']}%", row['corporate_hq'], row['registered_on'], row['expires_on'], row['last_updated_on'], row['location'], row['ip_type'], row['domains_associated'], row['raw_intel']])
     return Response(output.getvalue(), mimetype="text/csv", headers={"Content-disposition": "attachment; filename=tracxn_osit_intel.csv"})
 
 if __name__ == '__main__':

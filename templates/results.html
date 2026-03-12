@@ -72,6 +72,27 @@
         background: #e2e8f0;
         color: #475569;
     }
+    .raw-data-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.8rem;
+        margin-top: 0.5rem;
+    }
+    .raw-data-table th, .raw-data-table td {
+        border: 1px solid #e2e8f0;
+        padding: 0.5rem;
+        text-align: left;
+    }
+    .raw-data-table th {
+        background-color: #f1f5f9;
+        color: #475569;
+        font-weight: 600;
+        width: 30%;
+    }
+    .raw-data-table td {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        color: #334155;
+    }
 </style>
 {% endblock %}
 
@@ -146,6 +167,7 @@
                             data-reg="{{ target.registered_on }}"
                             data-exp="{{ target.expires_on }}"
                             data-upd="{{ target.last_updated_on }}"
+                            data-raw="{{ target.raw_intel }}"
                             style="padding: 0.25rem 0.5rem; font-size: 0.75rem;">🔍 View</button>
                     <button class="btn btn-danger delete-btn" data-id="{{ target.id }}"
                         style="padding: 0.25rem 0.5rem; font-size: 0.75rem;">🗑️ Delete</button>
@@ -216,6 +238,13 @@
                 <div id="modalCompany" class="detail-value"></div>
             </div>
         </div>
+        
+        <hr style="margin: 2rem 0; border: none; border-top: 1px solid var(--border);">
+        <h3 style="margin-bottom: 1.5rem; color: var(--text-main);">Extended Raw Data</h3>
+        
+        <div id="rawIntelContainer">
+            <!-- Raw Intel Tables will be injected here -->
+        </div>
     </div>
 </div>
 
@@ -241,6 +270,50 @@
             document.getElementById("modalReg").innerText = data.reg || "N/A";
             document.getElementById("modalExp").innerText = data.exp || "N/A";
             document.getElementById("modalUpd").innerText = data.upd || "N/A";
+            
+            // Handle Raw Intel Data
+            const rawContainer = document.getElementById("rawIntelContainer");
+            rawContainer.innerHTML = ""; // Clear previous data
+            
+            if (data.raw) {
+                try {
+                    const rawIntel = JSON.parse(data.raw);
+                    for (const [source, sourceData] of Object.entries(rawIntel)) {
+                        if (Object.keys(sourceData).length > 0) {
+                            const section = document.createElement("div");
+                            section.className = "detail-section";
+                            section.style.marginBottom = "2rem";
+                            
+                            const title = document.createElement("h4");
+                            title.innerText = source;
+                            section.appendChild(title);
+                            
+                            const table = document.createElement("table");
+                            table.className = "raw-data-table";
+                            
+                            for (const [key, value] of Object.entries(sourceData)) {
+                                const row = document.createElement("tr");
+                                const th = document.createElement("th");
+                                th.innerText = key;
+                                const td = document.createElement("td");
+                                td.innerText = typeof value === 'boolean' ? (value ? 'Yes' : 'No') : (value || 'N/A');
+                                
+                                row.appendChild(th);
+                                row.appendChild(td);
+                                table.appendChild(row);
+                            }
+                            
+                            section.appendChild(table);
+                            rawContainer.appendChild(section);
+                        }
+                    }
+                } catch (e) {
+                    console.error("Failed to parse raw intel JSON", e);
+                    rawContainer.innerHTML = "<p class='text-muted'>No extended data available.</p>";
+                }
+            } else {
+                rawContainer.innerHTML = "<p class='text-muted'>No extended data available.</p>";
+            }
             
             modal.style.display = "block";
         });
