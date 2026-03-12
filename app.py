@@ -64,37 +64,42 @@ def resolve_domain(target):
             return None, target
 
 def get_domain_whois(domain_name):
-    """Fetch full Domain WHOIS data"""
+    """Fetch full Domain WHOIS data with Registrant Org"""
     if not domain_name:
-        return "N/A", "N/A", "N/A", {}
+        return "N/A", "N/A", "N/A", {}, "N/A"
     
     try:
         w = whois.whois(domain_name)
         
         def format_date(d):
-            if isinstance(d, list):
-                d = d[0]
-            if isinstance(d, datetime):
-                return d.strftime("%Y-%m-%d")
+            if isinstance(d, list): d = d[0]
+            if isinstance(d, datetime): return d.strftime("%Y-%m-%d")
             return str(d)
 
         registered = format_date(w.creation_date) if w.creation_date else "N/A"
         expires = format_date(w.expiration_date) if w.expiration_date else "N/A"
         updated = format_date(w.updated_date) if w.updated_date else "N/A"
         
+        # Extract Actual Organization if available
+        registrant_org = w.org or w.name or "N/A"
+        if isinstance(registrant_org, list): registrant_org = registrant_org[0]
+
         raw_data = {
             "Registrar": w.registrar if w.registrar else "N/A",
+            "Registrant Org": registrant_org,
             "Name Servers": ", ".join(w.name_servers) if isinstance(w.name_servers, list) else (w.name_servers or "N/A"),
             "Emails": ", ".join(w.emails) if isinstance(w.emails, list) else (w.emails or "N/A"),
             "Status": ", ".join(w.status) if isinstance(w.status, list) else (w.status or "N/A")
         }
         
-        return registered, expires, updated, raw_data
+        return registered, expires, updated, raw_data, registrant_org
     except:
-        return "N/A", "N/A", "N/A", {}
+        return "N/A", "N/A", "N/A", {}, "N/A"
 
 def query_wikidata(company_name):
     """Fetch corporate HQ from Wikidata"""
+    if not company_name or company_name == "Unknown" or company_name == "N/A":
+        return None
     try:
         query = f"""
         SELECT ?item ?itemLabel ?hqLabel WHERE {{
@@ -116,8 +121,8 @@ def query_wikidata(company_name):
 
 def check_target(ip, domain=None):
     result = {
-        "company": "Unknown",
-        "legal_name": "N/A",
+        "company": "Unknown", # This will be the Actual Entity
+        "legal_name": "N/A",  # This will be the Infrastructure Owner
         "corporate_hq": "N/A",
         "location": "N/A",
         "provider": "N/A",
@@ -131,34 +136,31 @@ def check_target(ip, domain=None):
         "last_fetched": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }
 
-    raw_intel_dict = {
-        "WHOIS": {},
-        "Network (ip-api)": {},
-        "Infrastructure (RDAP)": {},
-        "Interconnection (PeeringDB)": {}
-    }
-
+    raw_intel_dict = {"WHOIS": {}, "Network (ip-api)": {}, "Infrastructure (RDAP)": {}, "Interconnection (PeeringDB)": {}}
     agreement_points = 0
+    actual_org_found = "N/A"
 
-    # Domain WHOIS
+    # 1. WHOIS (Identity Truth) - Most important for domains
     if domain:
-        reg, exp, upd, whois_raw = get_domain_whois(domain)
+        reg, exp, upd, whois_raw, registrant_org = get_domain_whois(domain)
         result["registered_on"] = reg
         result["expires_on"] = exp
         result["last_updated_on"] = upd
         raw_intel_dict["WHOIS"] = whois_raw
+        if registrant_org and registrant_org != "N/A" and "privacy" not in registrant_org.lower():
+            actual_org_found = registrant_org
+            agreement_points += 1
 
-    # Source 1: ip-api.com
+    # 2. Network (ip-api)
     try:
         geo_req = requests.get(f"http://ip-api.com/json/{ip}?fields=status,country,regionName,city,zip,lat,lon,timezone,org,as,isp,hosting,proxy", timeout=3)
         if geo_req.status_code == 200:
             geo_data = geo_req.json()
             if geo_data.get("status") == "success":
                 result["location"] = f"{geo_data.get('city')}, {geo_data.get('country')}"
-                result["company"] = geo_data.get("org") or geo_data.get("isp", "Unknown")
+                result["legal_name"] = geo_data.get("org") or geo_data.get("isp", "Unknown") # Infrastructure
                 result["provider"] = geo_data.get("as") or "Unknown"
                 result["ip_type"] = "Cloud" if geo_data.get("hosting") else "VPN" if geo_data.get("proxy") else "Business/Residential"
-                agreement_points += 1
                 
                 raw_intel_dict["Network (ip-api)"] = {
                     "Region": geo_data.get("regionName", "N/A"),
@@ -171,7 +173,7 @@ def check_target(ip, domain=None):
     except:
         pass
 
-    # Source 2: RDAP
+    # 3. RDAP (Infrastructure Truth)
     try:
         obj = IPWhois(ip)
         rdap = obj.lookup_rdap(depth=1)
@@ -180,52 +182,53 @@ def check_target(ip, domain=None):
             objects = rdap.get('objects', {})
             for key in objects:
                 name = objects[key].get('contact', {}).get('name')
-                if name:
-                    rdap_org = name
-                    break
+                if name: rdap_org = name; break
         
         if rdap_org:
-            if result["company"] != "Unknown":
-                if rdap_org.lower() in result["company"].lower() or result["company"].lower() in rdap_org.lower():
-                    agreement_points += 1
-            else:
-                result["company"] = rdap_org
-            result["legal_name"] = rdap_org
+            if not result["legal_name"] or result["legal_name"] == "Unknown":
+                result["legal_name"] = rdap_org
+            
+            # If Infrastructure matches Actual Org (meaning they own their IP space), high confidence
+            if actual_org_found != "N/A":
+                if rdap_org.lower() in actual_org_found.lower() or actual_org_found.lower() in rdap_org.lower():
+                    agreement_points += 2 # Strong match: Entity owns the Infrastructure
 
         raw_intel_dict["Infrastructure (RDAP)"] = {
             "CIDR Block": rdap.get('network', {}).get('cidr', 'N/A'),
-            "Start Address": rdap.get('network', {}).get('start_address', 'N/A'),
-            "End Address": rdap.get('network', {}).get('end_address', 'N/A'),
             "ASN Registry": rdap.get('asn_registry', 'N/A'),
-            "ASN CIDR": rdap.get('asn_cidr', 'N/A'),
-            "Network Country": rdap.get('network', {}).get('country', 'N/A')
+            "RIR Handle": rdap.get('network', {}).get('handle', 'N/A')
         }
     except:
         pass
 
-    # Source 3: Wikidata / PeeringDB
-    if result["company"] != "Unknown":
-        hq = query_wikidata(result["company"])
-        if hq:
-            result["corporate_hq"] = hq
-            agreement_points += 1
-            raw_intel_dict["Interconnection (PeeringDB)"]["Note"] = "Legal HQ verified via Wikidata"
+    # Final Decision: Who is the "Company"?
+    # If it's Cloud/Hosting, we prioritize WHOIS or Domain name
+    if result["ip_type"] == "Cloud":
+        if actual_org_found != "N/A":
+            result["company"] = actual_org_found
+        elif domain:
+            result["company"] = domain.split('.')[0].upper()
         else:
-            try:
-                pdb_req = requests.get(f"https://www.peeringdb.com/api/net?name__contains={result['company']}", timeout=3)
-                if pdb_req.status_code == 200:
-                    data = pdb_req.json().get('data', [])
-                    if data:
-                        match = data[0]
-                        result["corporate_hq"] = f"{match.get('city')}, {match.get('country')}"
-                        agreement_points += 1
-                        raw_intel_dict["Interconnection (PeeringDB)"] = {
-                            "Website": match.get('website', 'N/A'),
-                            "Network Type": match.get('info_type', 'N/A'),
-                            "Traffic Info": match.get('info_traffic', 'N/A')
-                        }
-            except:
-                pass
+            result["company"] = f"{result['legal_name']} (Infrastructure Provider)"
+    else:
+        # Business/Residential - Infrastructure owner is usually the company
+        result["company"] = actual_org_found if actual_org_found != "N/A" else result["legal_name"]
+
+    # 4. Corporate HQ (Legal Truth)
+    hq = query_wikidata(result["company"])
+    if hq:
+        result["corporate_hq"] = hq
+        agreement_points += 1
+    else:
+        try:
+            pdb_req = requests.get(f"https://www.peeringdb.com/api/net?name__contains={result['company']}", timeout=3)
+            if pdb_req.status_code == 200:
+                data = pdb_req.json().get('data', [])
+                if data:
+                    result["corporate_hq"] = f"{data[0].get('city')}, {data[0].get('country')}"
+                    agreement_points += 1
+        except:
+            pass
 
     # Passive DNS
     try:
@@ -236,10 +239,11 @@ def check_target(ip, domain=None):
     except:
         pass
 
+    # Confidence Logic
     if agreement_points >= 3: result["confidence_score"] = 98
-    elif agreement_points == 2: result["confidence_score"] = 92
-    elif agreement_points == 1: result["confidence_score"] = 75
-    else: result["confidence_score"] = 20
+    elif agreement_points == 2: result["confidence_score"] = 90
+    elif agreement_points == 1: result["confidence_score"] = 70
+    else: result["confidence_score"] = 30
 
     result["raw_intel"] = json.dumps(raw_intel_dict)
     return result
@@ -289,7 +293,6 @@ def upload_csv():
             if not row: continue
             target_input = row[0].strip()
             if target_input.lower() in ['ip', 'ip_address', 'address', 'domain', 'url'] or not target_input: continue
-            
             ip_address, domain = resolve_domain(target_input)
             if ip_address:
                 try:
@@ -345,9 +348,9 @@ def export_csv():
     conn.close()
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(['Domain', 'Company', 'IP Address', 'Confidence', 'Corporate HQ', 'Registered On', 'Expires On', 'Last Updated', 'Server Location', 'Type', 'Domains', 'Raw Intel JSON'])
+    writer.writerow(['Domain', 'Company', 'IP Address', 'Confidence', 'Corporate HQ', 'Registered On', 'Expires On', 'Last Updated', 'Server Location', 'Type', 'Infrastructure Owner'])
     for row in targets:
-        writer.writerow([row['domain'], row['company'], row['ip_address'], f"{row['confidence_score']}%", row['corporate_hq'], row['registered_on'], row['expires_on'], row['last_updated_on'], row['location'], row['ip_type'], row['domains_associated'], row['raw_intel']])
+        writer.writerow([row['domain'], row['company'], row['ip_address'], f"{row['confidence_score']}%", row['corporate_hq'], row['registered_on'], row['expires_on'], row['last_updated_on'], row['location'], row['ip_type'], row['legal_name']])
     return Response(output.getvalue(), mimetype="text/csv", headers={"Content-disposition": "attachment; filename=tracxn_osit_intel.csv"})
 
 if __name__ == '__main__':
