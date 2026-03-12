@@ -1,5 +1,71 @@
 {% extends 'layout.html' %}
 
+{% block head %}
+<style>
+    /* Modal Styles */
+    .modal {
+        display: none;
+        position: fixed;
+        z-index: 1000;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0,0,0,0.5);
+        backdrop-filter: blur(4px);
+    }
+    .modal-content {
+        background-color: var(--card-bg);
+        margin: 5% auto;
+        padding: 2rem;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        width: 70%;
+        max-width: 800px;
+        box-shadow: var(--shadow-md);
+        max-height: 85vh;
+        overflow-y: auto;
+    }
+    .modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1.5rem;
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 1rem;
+    }
+    .close-modal {
+        font-size: 1.5rem;
+        cursor: pointer;
+        color: var(--text-muted);
+    }
+    .detail-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1.5rem;
+    }
+    .detail-section {
+        margin-bottom: 1.5rem;
+    }
+    .detail-section h4 {
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        color: var(--text-muted);
+        letter-spacing: 0.05em;
+        margin-bottom: 0.5rem;
+    }
+    .detail-value {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        background: #f8fafc;
+        padding: 0.75rem;
+        border-radius: 4px;
+        border: 1px solid #f1f5f9;
+        font-size: 0.85rem;
+        word-break: break-all;
+    }
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="page-header results-header">
     <div>
@@ -22,7 +88,6 @@
                 <th>Corporate HQ</th>
                 <th>Server Location</th>
                 <th>Network Type</th>
-                <th>Associated Domains</th>
                 <th>Action</th>
             </tr>
         </thead>
@@ -54,9 +119,7 @@
                 <td class="mono">
                     <span class="badge badge-success mono">{{ target.ip_address }}</span>
                 </td>
-                <td class="mono" style="font-size: 0.8rem; max-width: 200px;">
-                    {{ target.corporate_hq }}
-                </td>
+                <td class="mono" style="font-size: 0.8rem; max-width: 200px;">{{ target.corporate_hq }}</td>
                 <td class="mono" style="font-size: 0.8rem;">{{ target.location }}</td>
                 <td>
                     {% if target.ip_type == "Pending" %}
@@ -69,85 +132,131 @@
                     <span class="badge" style="background-color: #f3f4f6; color: #374151;">{{ target.ip_type }}</span>
                     {% endif %}
                 </td>
-                <td class="mono" style="font-size: 0.8rem; max-width: 200px;">
-                    <div title="{{ target.domains_associated }}" style="white-space: normal; line-height: 1.2;">
-                        {{ target.domains_associated }}
-                    </div>
-                </td>
-                <td>
+                <td style="white-space: nowrap;">
+                    <button class="btn btn-secondary view-btn" 
+                            data-ip="{{ target.ip_address }}"
+                            data-company="{{ target.company }}"
+                            data-legal="{{ target.legal_name }}"
+                            data-hq="{{ target.corporate_hq }}"
+                            data-loc="{{ target.location }}"
+                            data-type="{{ target.ip_type }}"
+                            data-domains="{{ target.domains_associated }}"
+                            data-provider="{{ target.provider }}"
+                            data-conf="{{ target.confidence_score }}"
+                            style="padding: 0.25rem 0.5rem; font-size: 0.75rem;">🔍 View</button>
                     <button class="btn btn-danger delete-btn" data-id="{{ target.id }}"
                         style="padding: 0.25rem 0.5rem; font-size: 0.75rem;">🗑️ Delete</button>
                 </td>
             </tr>
             {% else %}
             <tr>
-                <td colspan="8" class="text-center no-data">No IPs added yet. Go add some!</td>
+                <td colspan="7" class="text-center no-data">No IPs added yet. Go add some!</td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
 </div>
 
+<!-- Modal -->
+<div id="detailsModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2 id="modalTitle">Intel Details</h2>
+            <span class="close-modal">&times;</span>
+        </div>
+        <div class="detail-grid">
+            <div class="detail-section">
+                <h4>Legal Identity (Consensus)</h4>
+                <div id="modalLegal" class="detail-value"></div>
+            </div>
+            <div class="detail-section">
+                <h4>IP Address</h4>
+                <div id="modalIP" class="detail-value"></div>
+            </div>
+            <div class="detail-section">
+                <h4>Corporate Headquarters</h4>
+                <div id="modalHQ" class="detail-value"></div>
+            </div>
+            <div class="detail-section">
+                <h4>Server Location (Physical)</h4>
+                <div id="modalLoc" class="detail-value"></div>
+            </div>
+            <div class="detail-section">
+                <h4>Network Provider (ASN)</h4>
+                <div id="modalProvider" class="detail-value"></div>
+            </div>
+            <div class="detail-section">
+                <h4>Network Type</h4>
+                <div id="modalType" class="detail-value"></div>
+            </div>
+            <div class="detail-section" style="grid-column: span 2;">
+                <h4>Associated Domains (Passive DNS)</h4>
+                <div id="modalDomains" class="detail-value" style="max-height: 150px; overflow-y: auto;"></div>
+            </div>
+            <div class="detail-section">
+                <h4>Infrastructure Owner (RDAP)</h4>
+                <div id="modalCompany" class="detail-value"></div>
+            </div>
+            <div class="detail-section">
+                <h4>Confidence Score</h4>
+                <div id="modalConf" class="detail-value"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
+    // Modal Logic
+    const modal = document.getElementById("detailsModal");
+    const closeBtn = document.getElementsByClassName("close-modal")[0];
+
+    document.querySelectorAll('.view-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const data = this.dataset;
+            document.getElementById("modalTitle").innerText = "Intel for " + data.ip;
+            document.getElementById("modalIP").innerText = data.ip;
+            document.getElementById("modalLegal").innerText = data.legal || "N/A";
+            document.getElementById("modalHQ").innerText = data.hq || "N/A";
+            document.getElementById("modalLoc").innerText = data.loc || "N/A";
+            document.getElementById("modalType").innerText = data.type || "N/A";
+            document.getElementById("modalProvider").innerText = data.provider || "N/A";
+            document.getElementById("modalDomains").innerText = data.domains || "N/A";
+            document.getElementById("modalCompany").innerText = data.company || "N/A";
+            document.getElementById("modalConf").innerText = data.conf + "%";
+            
+            modal.style.display = "block";
+        });
+    });
+
+    closeBtn.onclick = () => modal.style.display = "none";
+    window.onclick = (event) => { if (event.target == modal) modal.style.display = "none"; }
+
+    // Fetch and Delete Logic
     document.getElementById('fetch-btn').addEventListener('click', function () {
         const btn = this;
         const originalText = btn.innerHTML;
-
         btn.innerHTML = '⏳ Fetching consensus...';
         btn.disabled = true;
 
         fetch('{{ url_for('fetch_ips') }}', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            }
+            headers: {'Content-Type': 'application/json'}
         })
-            .then(response => response.json())
-            .then(data => {
-                if (data.status === 'success') {
-                    window.location.reload();
-                } else {
-                    alert('Error fetching data');
-                    btn.innerHTML = originalText;
-                    btn.disabled = false;
-                }
-            })
-            .catch(err => {
-                alert('Network error occurred. Reloading...');
-                window.location.reload();
-            });
+        .then(response => response.json())
+        .then(data => window.location.reload())
+        .catch(err => window.location.reload());
     });
 
     document.querySelectorAll('.delete-btn').forEach(btn => {
         btn.addEventListener('click', function () {
             if (!confirm('Are you sure you want to delete this target?')) return;
-
             const targetId = this.dataset.id;
-            const originalText = this.innerHTML;
-            this.innerHTML = '⏳';
-            this.disabled = true;
-
             fetch('/delete/' + targetId, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                }
+                headers: {'Content-Type': 'application/json'}
             })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.status === 'success') {
-                        window.location.reload();
-                    } else {
-                        alert('Error deleting target');
-                        this.innerHTML = originalText;
-                        this.disabled = false;
-                    }
-                })
-                .catch(err => {
-                    alert('Network error occurred');
-                    this.innerHTML = originalText;
-                    this.disabled = false;
-                });
+            .then(response => response.json())
+            .then(data => window.location.reload());
         });
     });
 </script>
