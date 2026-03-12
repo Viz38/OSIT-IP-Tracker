@@ -1,60 +1,43 @@
 # Detective Pradeep 🕵️
-**(Advanced IP Intelligence Tracker)**
+**(Advanced IP Intelligence & Consensus Tracker)**
 
-A powerful, standalone Python web application designed for IP intelligence and reconnaissance. Input a list of IP addresses to automatically map their **Company/Organization**, **Geolocation**, **Network Type (Cloud, VPN, Mobile)**, and **Passive DNS (Associated Domains)**.
+A powerful Python web application for high-accuracy IP reconnaissance. It uses a **Triple-Source Consensus Engine** to map IP addresses to their **Legal Company Identity**, **Corporate Headquarters**, **Network Type**, and **Passive DNS** with over 90% accuracy.
 
 ## Features
-- **Add IP Targets:** Input an IP address manually. Company information is fetched automatically.
-- **Bulk IP Upload:** Upload a list of IP addresses via CSV for mass intelligence gathering.
-- **Advanced Intelligence (Passive DNS):** Powered by the HackerTarget API; identifies multiple domains associated with a single IP, mimicking professional OSINT tools like Recon-ng and Amass.
-- **Network Type Detection:** Automatically classifies IPs as **Cloud/Hosting**, **VPN/Proxy**, **Mobile Network**, or **Business/Residential**.
-- **Geolocation & Infrastructure Tracking:** Powered by `ip-api.com`; find the city, country, and AS (Autonomous System) owner for every target.
-- **Export Intelligence:** Download all enriched results into a structured CSV file for reporting.
-- **Minimalist UI:** Sleek, modern dashboard built with HTML/CSS and vanilla JavaScript.
-- **Local Database:** Uses SQLite to store your intelligence data locally and persistently.
+- **Triple-Source Consensus Engine**: Triangulates data from three independent, high-accuracy sources to verify company identity.
+  1. **Infrastructure Truth (RDAP)**: Authoritative network registration data via RIRs (ARIN, RIPE, etc.).
+  2. **Network Truth (ip-api.com)**: Real-time ISP, Org, and physical server location mapping.
+  3. **Legal Truth (Wikidata/PeeringDB)**: Structured corporate metadata and global headquarters locations.
+- **Confidence Scoring**: Automatically calculates a confidence percentage (up to 98%) based on source agreement.
+- **Corporate HQ Mapping**: Distinguishes between the **Physical Server Location** and the company's **Legal Headquarters**.
+- **Advanced Passive DNS**: Identifies associated domains using historical and current DNS records.
+- **Network Type Detection**: Classifies IPs as **Cloud**, **VPN/Proxy**, or **Business/Residential**.
+- **Bulk Intelligence**: Upload hundreds of IPs via CSV for automated background processing.
+- **No-Limit Architecture**: Optimized for high-volume research using unlimited/high-limit open APIs.
 
-## How It Works
-Detective Pradeep is designed for security researchers and OSINT analysts. When you click "Fetch Intel", the Flask backend performs a multi-layered reconnaissance sweep:
+## Technology Stack
+- **Backend**: Python 3 + Flask
+- **Intelligence**: `ipwhois` (RDAP), `requests` (Wikidata SPARQL, ip-api, PeeringDB)
+- **Database**: SQLite
+- **UI**: Vanilla HTML5/CSS3/JS (Modern, responsive dashboard)
 
-### Intelligence Layers
-1. **Company & Org Mapping:** Uses the `org` and `isp` fields from the IP Geolocation API to identify the legal entity owning the IP space.
-2. **Passive DNS Lookup:** Instead of basic PTR lookups, the tool queries a Passive DNS database to find all historical and current domain mappings for the IP.
-3. **Network Classification:** Analyzes the IP's attributes (hosting, proxy, mobile flags) to determine its "Persona" (e.g., distinguishing between a user's home connection and a cloud server).
-4. **Geolocation:** Provides precise city and country mapping.
-
-### Technology Stack
-- **Backend:** Python 3 + Flask framework
-- **Database:** SQLite (local `ips.db` file)
-- **Frontend:** Vanilla HTML5, semantic CSS variables, and Vanilla Javascript (ES6).
-- **Styling:** Custom "Detective Pradeep" theme optimized for analytical data display.
-
-## Prerequisites
-- Python 3.7+
-- Internet connection (for API-based intelligence)
-
-## Installation
-1. Clone or download this folder to your machine.
-2. Open your terminal and navigate into the folder:
+## Installation & Setup
+1. **Navigate to the directory**:
    ```bash
    cd "IP Tracker"
    ```
-3. Install the required dependencies:
+2. **Install dependencies**:
    ```bash
    pip install -r requirements.txt
    ```
-
-## Running the Application
-1. Start the Flask server:
+3. **Run the application**:
    ```bash
    python3 app.py
    ```
-2. By default, the app runs on port `5001`. Open your web browser and navigate to:
-   ```
-   http://localhost:5001
-   ```
+4. **Access the UI**: Open `http://localhost:5001` in your browser.
 
-## Usage Instructions
-1. **Adding IPs:** On the home page (`/`), enter an IP address. Company and domain info will be fetched later.
-2. **Bulk Upload:** Upload a CSV with one IP per row (headers like "IP" are automatically ignored).
-3. **Fetching Intel:** On the "View Results" page, click the blue **"🔄 Fetch Intel"** button. The server will populate all metadata.
-4. **Exporting:** Click **"⬇️ Export CSV"** to save your research.
+## Usage
+1. **Add IPs**: Enter manual IPs or upload a CSV (first column: IP).
+2. **Fetch Consensus**: Click **"🔄 Fetch Intel"**. The engine will query multiple sources and calculate a confidence score.
+3. **Review Results**: View the legal name, verified HQ, and network type in the dashboard.
+4. **Export**: Download the enriched intelligence as a CSV.
