@@ -2,8 +2,8 @@
 
 {% block content %}
 <div class="page-header">
-    <h1>Add New IP Targets</h1>
-    <p class="subtitle">Enter an IP address manually, or upload a CSV file in bulk. Company info will be fetched automatically.</p>
+    <h1>Add New Targets</h1>
+    <p class="subtitle">Enter an IP address or a Domain manually, or upload a CSV file in bulk.</p>
 </div>
 
 <div style="display: flex; gap: 2rem; flex-wrap: wrap;">
@@ -11,17 +11,17 @@
         <h3 style="margin-bottom: 1rem;">Manual Entry</h3>
         <form method="POST" action="{{ url_for('index') }}" class="target-form">
             <div class="form-group">
-                <label for="ip_address">IP Address</label>
-                <input type="text" id="ip_address" name="ip_address" placeholder="e.g., 8.8.8.8" required>
+                <label for="target">IP Address or Domain</label>
+                <input type="text" id="target" name="target" placeholder="e.g., 8.8.8.8 or google.com" required>
             </div>
 
-            <button type="submit" class="btn btn-primary btn-block">Add IP</button>
+            <button type="submit" class="btn btn-primary btn-block">Add Target</button>
         </form>
     </div>
 
     <div class="card form-card" style="flex: 1; min-width: 300px; margin: 0;">
         <h3 style="margin-bottom: 1rem;">Bulk Upload CSV</h3>
-        <p class="subtitle" style="margin-bottom: 1rem;">Upload a CSV file containing a list of <strong>IP Addresses</strong> (one per row).</p>
+        <p class="subtitle" style="margin-bottom: 1rem;">Upload a CSV file containing a list of <strong>IPs or Domains</strong> (one per row).</p>
         <form method="POST" action="{{ url_for('upload_csv') }}" enctype="multipart/form-data" class="target-form">
             <div class="form-group">
                 <label for="csv_file">Select CSV File</label>
@@ -29,7 +29,7 @@
                     style="padding: 0.5rem; background: var(--bg-color);">
             </div>
 
-            <button type="submit" class="btn btn-secondary btn-block">Upload IPs</button>
+            <button type="submit" class="btn btn-secondary btn-block">Upload Targets</button>
         </form>
     </div>
 </div>

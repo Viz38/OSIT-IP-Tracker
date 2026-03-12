@@ -82,18 +82,19 @@
     <table class="results-table">
         <thead>
             <tr>
+                <th>Target Domain</th>
                 <th>Legal Company</th>
                 <th>Confidence</th>
                 <th>IP Address</th>
                 <th>Corporate HQ</th>
                 <th>Server Location</th>
-                <th>Network Type</th>
                 <th>Action</th>
             </tr>
         </thead>
         <tbody>
             {% for target in targets %}
             <tr>
+                <td class="mono" style="font-size: 0.85rem; font-weight: 500;">{{ target.domain or '-' }}</td>
                 <td style="font-weight: 500;">
                     {% if target.legal_name == "Pending" or target.legal_name == "N/A" %}
                         {% if target.company == "Pending" %}
@@ -121,20 +122,10 @@
                 </td>
                 <td class="mono" style="font-size: 0.8rem; max-width: 200px;">{{ target.corporate_hq }}</td>
                 <td class="mono" style="font-size: 0.8rem;">{{ target.location }}</td>
-                <td>
-                    {% if target.ip_type == "Pending" %}
-                    <span class="badge badge-pending">Pending</span>
-                    {% elif target.ip_type == "Cloud/Hosting" %}
-                    <span class="badge" style="background-color: #e0e7ff; color: #3730a3;">Cloud</span>
-                    {% elif target.ip_type == "VPN/Proxy" %}
-                    <span class="badge badge-error">VPN/Proxy</span>
-                    {% else %}
-                    <span class="badge" style="background-color: #f3f4f6; color: #374151;">{{ target.ip_type }}</span>
-                    {% endif %}
-                </td>
                 <td style="white-space: nowrap;">
                     <button class="btn btn-secondary view-btn" 
                             data-ip="{{ target.ip_address }}"
+                            data-domain="{{ target.domain or 'None' }}"
                             data-company="{{ target.company }}"
                             data-legal="{{ target.legal_name }}"
                             data-hq="{{ target.corporate_hq }}"
@@ -166,12 +157,16 @@
         </div>
         <div class="detail-grid">
             <div class="detail-section">
-                <h4>Legal Identity (Consensus)</h4>
-                <div id="modalLegal" class="detail-value"></div>
+                <h4>Original Target Domain</h4>
+                <div id="modalDomain" class="detail-value"></div>
             </div>
             <div class="detail-section">
-                <h4>IP Address</h4>
+                <h4>Resolved IP Address</h4>
                 <div id="modalIP" class="detail-value"></div>
+            </div>
+            <div class="detail-section">
+                <h4>Legal Identity (Consensus)</h4>
+                <div id="modalLegal" class="detail-value"></div>
             </div>
             <div class="detail-section">
                 <h4>Corporate Headquarters</h4>
@@ -215,6 +210,7 @@
             const data = this.dataset;
             document.getElementById("modalTitle").innerText = "Intel for " + data.ip;
             document.getElementById("modalIP").innerText = data.ip;
+            document.getElementById("modalDomain").innerText = data.domain || "N/A";
             document.getElementById("modalLegal").innerText = data.legal || "N/A";
             document.getElementById("modalHQ").innerText = data.hq || "N/A";
             document.getElementById("modalLoc").innerText = data.loc || "N/A";

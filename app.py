@@ -19,6 +19,7 @@ def init_db():
     c.execute('''
         CREATE TABLE IF NOT EXISTS targets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            domain TEXT,
             company TEXT,
             legal_name TEXT,
             corporate_hq TEXT,
@@ -38,6 +39,28 @@ def get_db_connection():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
+
+def resolve_domain(target):
+    """Resolve domain to IP or return target if already IP"""
+    target = target.strip().lower()
+    # Remove protocol if present
+    if "://" in target:
+        target = target.split("://")[1]
+    # Remove path if present
+    if "/" in target:
+        target = target.split("/")[0]
+        
+    try:
+        # Check if it's already an IP
+        socket.inet_aton(target)
+        return target, None
+    except socket.error:
+        # It's a domain, try to resolve
+        try:
+            ip = socket.gethostbyname(target)
+            return ip, target
+        except:
+            return None, target
 
 def query_wikidata(company_name):
     """Fetch corporate HQ from Wikidata (Unlimited/Free)"""
@@ -75,7 +98,7 @@ def check_target(ip):
 
     agreement_points = 0
 
-    # Source 1: ip-api.com (Fast, High Limit, Network Owner)
+    # Source 1: ip-api.com
     try:
         geo_req = requests.get(f"http://ip-api.com/json/{ip}?fields=status,country,city,org,as,isp,hosting,proxy", timeout=3)
         if geo_req.status_code == 200:
@@ -89,7 +112,7 @@ def check_target(ip):
     except:
         pass
 
-    # Source 2: RDAP / ipwhois (Authoritative Registration)
+    # Source 2: RDAP
     try:
         obj = IPWhois(ip)
         rdap = obj.lookup_rdap(depth=1)
@@ -103,25 +126,22 @@ def check_target(ip):
                     break
         
         if rdap_org:
-            # Check agreement with ip-api
             if result["company"] != "Unknown":
                 if rdap_org.lower() in result["company"].lower() or result["company"].lower() in rdap_org.lower():
                     agreement_points += 1
             else:
                 result["company"] = rdap_org
-            
             result["legal_name"] = rdap_org
     except:
         pass
 
-    # Source 3: Wikidata (Corporate HQ & Metadata - Unlimited)
+    # Source 3: Wikidata
     if result["company"] != "Unknown":
         hq = query_wikidata(result["company"])
         if hq:
             result["corporate_hq"] = hq
             agreement_points += 1
         else:
-            # Fallback PeeringDB (Still very accurate for infrastructure)
             try:
                 pdb_req = requests.get(f"https://www.peeringdb.com/api/net?name__contains={result['company']}", timeout=3)
                 if pdb_req.status_code == 200:
@@ -141,39 +161,38 @@ def check_target(ip):
     except:
         pass
 
-    # Confidence Score Logic
-    if agreement_points >= 3:
-        result["confidence_score"] = 98
-    elif agreement_points == 2:
-        result["confidence_score"] = 92
-    elif agreement_points == 1:
-        result["confidence_score"] = 75
-    else:
-        result["confidence_score"] = 20
+    if agreement_points >= 3: result["confidence_score"] = 98
+    elif agreement_points == 2: result["confidence_score"] = 92
+    elif agreement_points == 1: result["confidence_score"] = 75
+    else: result["confidence_score"] = 20
 
     return result
 
 @app.route('/', methods=('GET', 'POST'))
 def index():
     if request.method == 'POST':
-        ip_address = request.form['ip_address'].strip()
-        if not ip_address:
-            flash('IP Address is required!')
+        target_input = request.form['target'].strip()
+        if not target_input:
+            flash('Target (IP or Domain) is required!')
         else:
-            conn = get_db_connection()
-            try:
-                conn.execute('''
-                    INSERT INTO targets (company, legal_name, corporate_hq, ip_address, location, provider, domains_associated, ip_type, confidence_score, last_fetched) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                    ("Pending", "Pending", "Pending", ip_address, "Pending", "Pending", "Pending Fetch", "Pending", 0, "Never")
-                )
-                conn.commit()
-                flash('IP successfully added!')
-                return redirect(url_for('results'))
-            except sqlite3.IntegrityError:
-                flash('This IP address already exists in the tracker.')
-            finally:
-                conn.close()
+            ip_address, domain = resolve_domain(target_input)
+            if not ip_address:
+                flash(f'Could not resolve domain: {target_input}')
+            else:
+                conn = get_db_connection()
+                try:
+                    conn.execute('''
+                        INSERT INTO targets (domain, company, legal_name, corporate_hq, ip_address, location, provider, domains_associated, ip_type, confidence_score, last_fetched) 
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                        (domain, "Pending", "Pending", "Pending", ip_address, "Pending", "Pending", "Pending Fetch", "Pending", 0, "Never")
+                    )
+                    conn.commit()
+                    flash(f'Target successfully added: {ip_address}')
+                    return redirect(url_for('results'))
+                except sqlite3.IntegrityError:
+                    flash('This IP address already exists in the tracker.')
+                finally:
+                    conn.close()
     return render_template('index.html')
 
 @app.route('/upload_csv', methods=['POST'])
@@ -192,20 +211,23 @@ def upload_csv():
         added_count = 0
         for row in csv_input:
             if not row: continue
-            ip_address = row[0].strip()
-            if ip_address.lower() in ['ip', 'ip_address', 'address'] or not ip_address: continue
-            try:
-                conn.execute('''
-                    INSERT INTO targets (company, legal_name, corporate_hq, ip_address, location, provider, domains_associated, ip_type, confidence_score, last_fetched) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                    ("Pending", "Pending", "Pending", ip_address, "Pending", "Pending", "Pending Fetch", "Pending", 0, "Never")
-                )
-                added_count += 1
-            except:
-                pass
+            target_input = row[0].strip()
+            if target_input.lower() in ['ip', 'ip_address', 'address', 'domain', 'url'] or not target_input: continue
+            
+            ip_address, domain = resolve_domain(target_input)
+            if ip_address:
+                try:
+                    conn.execute('''
+                        INSERT INTO targets (domain, company, legal_name, corporate_hq, ip_address, location, provider, domains_associated, ip_type, confidence_score, last_fetched) 
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                        (domain, "Pending", "Pending", "Pending", ip_address, "Pending", "Pending", "Pending Fetch", "Pending", 0, "Never")
+                    )
+                    added_count += 1
+                except:
+                    pass
         conn.commit()
         conn.close()
-        flash(f'Successfully added {added_count} IPs!')
+        flash(f'Successfully processed {added_count} targets from CSV!')
         return redirect(url_for('results'))
     return redirect(url_for('index'))
 
@@ -247,9 +269,9 @@ def export_csv():
     conn.close()
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(['Company', 'IP Address', 'Confidence', 'Corporate HQ', 'Server Location', 'Type', 'Domains'])
+    writer.writerow(['Domain', 'Company', 'IP Address', 'Confidence', 'Corporate HQ', 'Server Location', 'Type', 'Domains'])
     for row in targets:
-        writer.writerow([row['company'], row['ip_address'], f"{row['confidence_score']}%", row['corporate_hq'], row['location'], row['ip_type'], row['domains_associated']])
+        writer.writerow([row['domain'], row['company'], row['ip_address'], f"{row['confidence_score']}%", row['corporate_hq'], row['location'], row['ip_type'], row['domains_associated']])
     return Response(output.getvalue(), mimetype="text/csv", headers={"Content-disposition": "attachment; filename=tracxn_osit_intel.csv"})
 
 if __name__ == '__main__':
