@@ -100,7 +100,7 @@
 <div class="page-header results-header">
     <div>
         <h1>OSIT Intel Results</h1>
-        <p class="subtitle">Triple-Source Consensus: Legal, Infrastructure, and Interconnection Truth.</p>
+        <p class="subtitle">Triple-Source Consensus + AI Brand Unmasking.</p>
     </div>
     <div class="header-actions">
         <a href="{{ url_for('export_csv') }}" class="btn btn-secondary">⬇️ Export CSV</a>
@@ -113,7 +113,7 @@
         <thead>
             <tr>
                 <th>Target Domain</th>
-                <th>Legal Company</th>
+                <th>Verified Company</th>
                 <th>Confidence</th>
                 <th>IP Address</th>
                 <th>Corporate HQ</th>
@@ -125,19 +125,15 @@
             {% for target in targets %}
             <tr>
                 <td class="mono" style="font-size: 0.85rem; font-weight: 500;">{{ target.domain or '-' }}</td>
-                <td style="font-weight: 500;">
-                    {% if target.legal_name == "Pending" or target.legal_name == "N/A" %}
-                        {% if target.company == "Pending" %}
-                            <span class="badge badge-pending">Pending</span>
-                        {% else %}
-                            {{ target.company }}
-                        {% endif %}
+                <td style="font-weight: 600; color: var(--primary);">
+                    {% if target.company == "Pending" or target.company == "Unknown" %}
+                        <span class="badge badge-pending">Pending</span>
                     {% else %}
-                        {{ target.legal_name }}
+                        {{ target.company }}
                     {% endif %}
                 </td>
                 <td>
-                    {% if target.confidence_score >= 90 %}
+                    {% if target.confidence_score >= 95 %}
                     <span class="badge" style="background-color: #dcfce7; color: #166534; border: 1px solid #bbf7d0;">Verified {{ target.confidence_score }}%</span>
                     {% elif target.confidence_score >= 70 %}
                     <span class="badge" style="background-color: #fef9c3; color: #854d0e; border: 1px solid #fef08a;">Likely {{ target.confidence_score }}%</span>
@@ -169,14 +165,14 @@
                             data-upd="{{ target.last_updated_on }}"
                             data-raw="{{ target.raw_intel }}"
                             data-ai="{{ target.ai_reasoning }}"
-                            style="padding: 0.25rem 0.5rem; font-size: 0.75rem;">🔍 View</button>
+                            style="padding: 0.25rem 0.5rem; font-size: 0.75rem;">🔍 View Full Details</button>
                     <button class="btn btn-danger delete-btn" data-id="{{ target.id }}"
                         style="padding: 0.25rem 0.5rem; font-size: 0.75rem;">🗑️ Delete</button>
                 </td>
             </tr>
             {% else %}
             <tr>
-                <td colspan="7" class="text-center no-data">No IPs added yet. Go add some!</td>
+                <td colspan="7" class="text-center no-data">No targets added yet.</td>
             </tr>
             {% endfor %}
         </tbody>
@@ -207,8 +203,8 @@
                 <div id="modalIP" class="detail-value"></div>
             </div>
             <div class="detail-section">
-                <h4>Legal Identity (Consensus)</h4>
-                <div id="modalLegal" class="detail-value"></div>
+                <h4>Verified Identity (Company)</h4>
+                <div id="modalCompany" class="detail-value" style="font-weight: 600; color: var(--primary);"></div>
             </div>
             <div class="detail-section">
                 <h4>Corporate Headquarters</h4>
@@ -235,26 +231,22 @@
                 <div id="modalAI" class="detail-value" style="background: #fffbeb; border-color: #fef3c7; font-family: inherit;"></div>
             </div>
             <div class="detail-section" style="grid-column: span 2;">
-                <h4>Associated Domains (Passive DNS)</h4>
-                <div id="modalDomains" class="detail-value" style="max-height: 150px; overflow-y: auto;"></div>
+                <h4>Infrastructure Owner (RDAP)</h4>
+                <div id="modalLegal" class="detail-value"></div>
             </div>
             <div class="detail-section" style="grid-column: span 2;">
-                <h4>Infrastructure Owner (RDAP)</h4>
-                <div id="modalCompany" class="detail-value"></div>
+                <h4>Associated Domains (Passive DNS)</h4>
+                <div id="modalDomains" class="detail-value" style="max-height: 150px; overflow-y: auto;"></div>
             </div>
         </div>
         
         <hr style="margin: 2rem 0; border: none; border-top: 1px solid var(--border);">
         <h3 style="margin-bottom: 1.5rem; color: var(--text-main);">Extended Raw Data</h3>
-        
-        <div id="rawIntelContainer">
-            <!-- Raw Intel Tables will be injected here -->
-        </div>
+        <div id="rawIntelContainer"></div>
     </div>
 </div>
 
 <script>
-    // Modal Logic
     const modal = document.getElementById("detailsModal");
     const closeBtn = document.getElementsByClassName("close-modal")[0];
 
@@ -264,24 +256,26 @@
             document.getElementById("modalTitle").innerText = "Intel for " + data.ip;
             document.getElementById("modalIP").innerText = data.ip;
             document.getElementById("modalDomain").innerText = data.domain || "N/A";
-            document.getElementById("modalLegal").innerText = data.legal || "N/A";
+            
+            // Corrected mappings:
+            document.getElementById("modalCompany").innerText = data.company || "Unknown"; // verified brand
+            document.getElementById("modalLegal").innerText = data.legal || "N/A"; // infra owner
+            
             document.getElementById("modalHQ").innerText = data.hq || "N/A";
             document.getElementById("modalLoc").innerText = data.loc || "N/A";
             document.getElementById("modalType").innerText = data.type || "N/A";
             document.getElementById("modalProvider").innerText = data.provider || "N/A";
             document.getElementById("modalDomains").innerText = data.domains || "N/A";
-            document.getElementById("modalCompany").innerText = data.company || "N/A";
             document.getElementById("modalConf").innerText = data.conf + "%";
             document.getElementById("modalReg").innerText = data.reg || "N/A";
             document.getElementById("modalExp").innerText = data.exp || "N/A";
             document.getElementById("modalUpd").innerText = data.upd || "N/A";
-            document.getElementById("modalAI").innerText = data.ai || "N/A";
+            document.getElementById("modalAI").innerText = data.ai || "AI verification not yet performed or missing API key.";
             
-            // Handle Raw Intel Data
             const rawContainer = document.getElementById("rawIntelContainer");
-            rawContainer.innerHTML = ""; // Clear previous data
+            rawContainer.innerHTML = "";
             
-            if (data.raw) {
+            if (data.raw && data.raw !== "None") {
                 try {
                     const rawIntel = JSON.parse(data.raw);
                     for (const [source, sourceData] of Object.entries(rawIntel)) {
@@ -289,38 +283,24 @@
                             const section = document.createElement("div");
                             section.className = "detail-section";
                             section.style.marginBottom = "2rem";
-                            
                             const title = document.createElement("h4");
                             title.innerText = source;
                             section.appendChild(title);
-                            
                             const table = document.createElement("table");
                             table.className = "raw-data-table";
-                            
                             for (const [key, value] of Object.entries(sourceData)) {
                                 const row = document.createElement("tr");
-                                const th = document.createElement("th");
-                                th.innerText = key;
-                                const td = document.createElement("td");
-                                td.innerText = typeof value === 'boolean' ? (value ? 'Yes' : 'No') : (value || 'N/A');
-                                
-                                row.appendChild(th);
-                                row.appendChild(td);
+                                const th = document.createElement("th"); th.innerText = key;
+                                const td = document.createElement("td"); td.innerText = typeof value === 'boolean' ? (value ? 'Yes' : 'No') : (value || 'N/A');
+                                row.appendChild(th); row.appendChild(td);
                                 table.appendChild(row);
                             }
-                            
                             section.appendChild(table);
                             rawContainer.appendChild(section);
                         }
                     }
-                } catch (e) {
-                    console.error("Failed to parse raw intel JSON", e);
-                    rawContainer.innerHTML = "<p class='text-muted'>No extended data available.</p>";
-                }
-            } else {
-                rawContainer.innerHTML = "<p class='text-muted'>No extended data available.</p>";
-            }
-            
+                } catch (e) { rawContainer.innerHTML = "<p>Raw data parsing failed.</p>"; }
+            } else { rawContainer.innerHTML = "<p class='text-muted'>No extended data available.</p>"; }
             modal.style.display = "block";
         });
     });
@@ -328,32 +308,19 @@
     closeBtn.onclick = () => modal.style.display = "none";
     window.onclick = (event) => { if (event.target == modal) modal.style.display = "none"; }
 
-    // Fetch and Delete Logic
     document.getElementById('fetch-btn').addEventListener('click', function () {
-        const btn = this;
-        const originalText = btn.innerHTML;
-        btn.innerHTML = '⏳ Fetching consensus...';
-        btn.disabled = true;
-
-        fetch('{{ url_for('fetch_ips') }}', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'}
-        })
-        .then(response => response.json())
-        .then(data => window.location.reload())
-        .catch(err => window.location.reload());
+        this.innerHTML = '⏳ Processing...';
+        this.disabled = true;
+        fetch('{{ url_for('fetch_ips') }}', {method: 'POST', headers: {'Content-Type': 'application/json'}})
+        .then(() => window.location.reload())
+        .catch(() => window.location.reload());
     });
 
     document.querySelectorAll('.delete-btn').forEach(btn => {
         btn.addEventListener('click', function () {
-            if (!confirm('Are you sure you want to delete this target?')) return;
-            const targetId = this.dataset.id;
-            fetch('/delete/' + targetId, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'}
-            })
-            .then(response => response.json())
-            .then(data => window.location.reload());
+            if (!confirm('Delete target?')) return;
+            fetch('/delete/' + this.dataset.id, {method: 'POST'})
+            .then(() => window.location.reload());
         });
     });
 </script>
