@@ -1,0 +1,35 @@
+{% extends 'layout.html' %}
+
+{% block content %}
+<div class="page-header">
+    <h1>System Settings</h1>
+    <p class="subtitle">Configure AI Verification and validation settings.</p>
+</div>
+
+<div class="card form-card" style="max-width: 800px; margin: 0 auto;">
+    <form method="POST" action="{{ url_for('settings') }}">
+        <div class="form-group">
+            <label for="openrouter_key">OpenRouter API Key</label>
+            <input type="password" id="openrouter_key" name="openrouter_key" 
+                   value="{{ config.openrouter_key }}" placeholder="sk-or-v1-..." 
+                   style="width: 100%; padding: 0.75rem; border: 1px solid var(--border); border-radius: 4px;">
+            <p class="subtitle" style="margin-top: 0.5rem; font-size: 0.8rem;">
+                Using model: <code>openrouter/trinity-large-preview</code>
+            </p>
+        </div>
+
+        <div class="form-group" style="margin-top: 2rem;">
+            <label for="ai_prompt">AI Validation Prompt</label>
+            <textarea id="ai_prompt" name="ai_prompt" rows="12" 
+                      style="width: 100%; padding: 0.75rem; border: 1px solid var(--border); border-radius: 4px; font-family: monospace; font-size: 0.9rem;">{{ config.ai_prompt }}</textarea>
+            <p class="subtitle" style="margin-top: 0.5rem; font-size: 0.8rem;">
+                Available placeholders: <code>{domain}</code>, <code>{ip}</code>, <code>{infra}</code>, <code>{network}</code>, <code>{brand}</code>, <code>{whois_org}</code>
+            </p>
+        </div>
+
+        <div style="margin-top: 2rem;">
+            <button type="submit" class="btn btn-primary">Save Settings</button>
+        </div>
+    </form>
+</div>
+{% endblock %}

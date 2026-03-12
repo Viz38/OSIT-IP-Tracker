@@ -168,6 +168,7 @@
                             data-exp="{{ target.expires_on }}"
                             data-upd="{{ target.last_updated_on }}"
                             data-raw="{{ target.raw_intel }}"
+                            data-ai="{{ target.ai_reasoning }}"
                             style="padding: 0.25rem 0.5rem; font-size: 0.75rem;">🔍 View</button>
                     <button class="btn btn-danger delete-btn" data-id="{{ target.id }}"
                         style="padding: 0.25rem 0.5rem; font-size: 0.75rem;">🗑️ Delete</button>
@@ -230,6 +231,10 @@
                 <div id="modalConf" class="detail-value"></div>
             </div>
             <div class="detail-section" style="grid-column: span 2;">
+                <h4>AI Verification Reasoning</h4>
+                <div id="modalAI" class="detail-value" style="background: #fffbeb; border-color: #fef3c7; font-family: inherit;"></div>
+            </div>
+            <div class="detail-section" style="grid-column: span 2;">
                 <h4>Associated Domains (Passive DNS)</h4>
                 <div id="modalDomains" class="detail-value" style="max-height: 150px; overflow-y: auto;"></div>
             </div>
@@ -270,6 +275,7 @@
             document.getElementById("modalReg").innerText = data.reg || "N/A";
             document.getElementById("modalExp").innerText = data.exp || "N/A";
             document.getElementById("modalUpd").innerText = data.upd || "N/A";
+            document.getElementById("modalAI").innerText = data.ai || "N/A";
             
             // Handle Raw Intel Data
             const rawContainer = document.getElementById("rawIntelContainer");
