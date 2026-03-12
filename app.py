@@ -5,6 +5,7 @@ import requests
 import csv
 import io
 import json
+import sys
 from datetime import datetime
 from ipwhois import IPWhois
 import whois
@@ -15,19 +16,30 @@ app = Flask(__name__)
 app.secret_key = 'super_secret_tracker_key_for_flash_messages'
 DB_PATH = 'ips.db'
 
-DEFAULT_PROMPT = """Analyze the following technical data gathered for an IP/Domain and provide the final verified organization name and its corporate headquarters location. 
-Data gathered:
+# Refined Prompt to force HQ discovery
+DEFAULT_PROMPT = """Analyze the following technical and scraped data for an IP/Domain. 
+Your primary task is to identify the ACTUAL Business Entity (not the CDN/ISP) and find their OFFICIAL CORPORATE HEADQUARTERS LOCATION.
+
+Input Data:
 - Target Domain: {domain}
 - IP Address: {ip}
 - Infrastructure Owner (RDAP): {infra}
 - Network Provider (ip-api): {network}
 - Brand Intelligence: {brand}
 - WHOIS Registrant: {whois_org}
-- Internal HQ Search: {internal_hq}
-- Live Website Context (Scraped): {scraped_content}
+- Scraped Website Context: {scraped_content}
 
-The infrastructure owner might be a CDN (like AWS, Cloudflare) or an ISP. Your goal is to identify the actual business or entity that is using this infrastructure.
-Return only a JSON object with three keys: "final_company", "final_hq", and "reasoning"."""
+Instructions:
+1. If the infrastructure owner is a CDN (AWS, Akamai, Cloudflare), look at the Domain and Brand Intelligence to find the actual user.
+2. Even if 'Internal HQ Search' was N/A, you MUST use your own internal knowledge to provide the City and Country of the company's HQ.
+3. Return ONLY a JSON object.
+
+Format:
+{{
+  "final_company": "Full Legal Name",
+  "final_hq": "City, Country",
+  "reasoning": "Brief explanation of your identification process."
+}}"""
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)
@@ -92,7 +104,6 @@ def resolve_domain(target):
             return None, target
 
 def get_live_context(domain):
-    """Scrape website meta tags and visible text for AI context"""
     context = {"meta": "", "text": ""}
     if not domain: return context
     try:
@@ -102,8 +113,7 @@ def get_live_context(domain):
         meta_desc = soup.find('meta', attrs={'name': 'description'})
         og_desc = soup.find('meta', property='og:description')
         context["meta"] = (meta_desc['content'] if meta_desc else "") + " " + (og_desc['content'] if og_desc else "")
-        for script in soup(["script", "style"]):
-            script.extract()
+        for script in soup(["script", "style"]): script.extract()
         text = soup.get_text()
         lines = (line.strip() for line in text.splitlines())
         chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
@@ -120,7 +130,7 @@ def get_brand_intelligence(domain):
             data = res.json()
             if len(data) > 0 and data[0].get('name'):
                 brand_data["name"] = data[0]['name']
-                brand_data["source"] = "Clearbit Intelligence API"
+                brand_data["source"] = "Clearbit"
                 return brand_data
     except: pass
     try:
@@ -128,16 +138,9 @@ def get_brand_intelligence(domain):
         res = requests.get(f"https://{domain}", headers=headers, timeout=5)
         soup = BeautifulSoup(res.text, 'html.parser')
         site_name = soup.find('meta', property='og:site_name')
-        if site_name and site_name.get('content'):
-            brand_data["name"] = site_name['content'].strip()
-            brand_data["source"] = "Live Website Meta (og:site_name)"
-            return brand_data
-        if soup.title and soup.title.string:
-            title = soup.title.string.strip()
-            if '|' in title: brand_data["name"] = title.split('|')[-1].strip()
-            elif '-' in title: brand_data["name"] = title.split('-')[-1].strip()
-            else: brand_data["name"] = title
-            brand_data["source"] = "Live Website Title"
+        if site_name:
+            brand_data["name"] = site_name.get('content')
+            brand_data["source"] = "Meta Tags"
             return brand_data
     except: pass
     return brand_data
@@ -150,50 +153,28 @@ def get_domain_whois(domain_name):
             if isinstance(d, list): d = d[0]
             if isinstance(d, datetime): return d.strftime("%Y-%m-%d")
             return str(d)
-        registered = format_date(w.creation_date) if w.creation_date else "N/A"
-        expires = format_date(w.expiration_date) if w.expiration_date else "N/A"
-        updated = format_date(w.updated_date) if w.updated_date else "N/A"
+        registered = format_date(w.creation_date)
+        expires = format_date(w.expiration_date)
+        updated = format_date(w.updated_date)
         registrant_org = w.org or w.name or "N/A"
         if isinstance(registrant_org, list): registrant_org = registrant_org[0]
         raw_data = {"Registrar": w.registrar, "Registrant Org": registrant_org}
         return registered, expires, updated, raw_data, registrant_org
     except: return "N/A", "N/A", "N/A", {}, "N/A"
 
-def query_wikidata(company_name):
-    if not company_name or company_name in ["Unknown", "N/A"]: return None
-    try:
-        query = f"""
-        SELECT ?item ?itemLabel ?hqLabel WHERE {{
-          ?item rdfs:label "{company_name}"@en; wdt:P159 ?hq.
-          SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en". }}
-        }} LIMIT 1
-        """
-        headers = {'User-Agent': 'TracxnOSIT/1.0'}
-        resp = requests.get("https://query.wikidata.org/sparql", params={'query': query, 'format': 'json'}, headers=headers, timeout=5)
-        if resp.status_code == 200:
-            data = resp.json().get('results', {}).get('bindings', [])
-            if data: return data[0].get('hqLabel', {}).get('value')
-    except:
-        pass
-    return None
-
 def call_openrouter(config, data):
-    if not config or not config['openrouter_key']:
-        return None, None, "OpenRouter API Key not configured in settings."
+    if not config or not config['openrouter_key']: return None, None, "Missing Key."
+    prompt = config['ai_prompt'].format(
+        domain=data.get('domain', 'N/A'),
+        ip=data.get('ip', 'N/A'),
+        infra=data.get('infra', 'N/A'),
+        network=data.get('network', 'N/A'),
+        brand=data.get('brand', 'N/A'),
+        whois_org=data.get('whois_org', 'N/A'),
+        scraped_content=data.get('scraped_content', 'N/A')
+    )
     try:
-        prompt = config['ai_prompt'].format(
-            domain=data.get('domain', 'N/A'),
-            ip=data.get('ip', 'N/A'),
-            infra=data.get('infra', 'N/A'),
-            network=data.get('network', 'N/A'),
-            brand=data.get('brand', 'N/A'),
-            whois_org=data.get('whois_org', 'N/A'),
-            internal_hq=data.get('internal_hq', 'N/A'),
-            scraped_content=data.get('scraped_content', 'N/A')
-        )
-    except Exception as e:
-        return None, None, f"Prompt formatting error: {str(e)}"
-    try:
+        print(f"--- AI REQUEST: {data.get('domain')} ---", file=sys.stderr)
         response = requests.post(
             url="https://openrouter.ai/api/v1/chat/completions",
             headers={
@@ -207,19 +188,15 @@ def call_openrouter(config, data):
                 "messages": [{"role": "user", "content": prompt}],
                 "response_format": {"type": "json_object"}
             }),
-            timeout=15
+            timeout=20
         )
         if response.status_code == 200:
             content = response.json()['choices'][0]['message']['content']
-            try:
-                ai_res = json.loads(content)
-                return ai_res.get('final_company'), ai_res.get('final_hq'), ai_res.get('reasoning')
-            except:
-                return content, None, "Model returned raw text instead of JSON."
-        else:
-            return None, None, f"OpenRouter Error {response.status_code}: {response.text}"
-    except Exception as e:
-        return None, None, f"AI Network Exception: {str(e)}"
+            print(f"--- AI RESPONSE ---\n{content}", file=sys.stderr)
+            ai_res = json.loads(content)
+            return ai_res.get('final_company'), ai_res.get('final_hq'), ai_res.get('reasoning')
+        return None, None, f"Error {response.status_code}"
+    except Exception as e: return None, None, str(e)
 
 def check_target(ip, domain=None):
     config = get_config()
@@ -230,69 +207,45 @@ def check_target(ip, domain=None):
         "expires_on": "N/A", "last_updated_on": "N/A", "raw_intel": "{}",
         "ai_reasoning": "N/A", "last_fetched": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }
-    raw_intel_dict = {"WHOIS": {}, "Network (ip-api)": {}, "Infrastructure (RDAP)": {}}
+    raw_intel_dict = {"WHOIS": {}, "Network": {}, "Infrastructure": {}}
     actual_org_found = "N/A"
     scraped = get_live_context(domain)
     if domain:
         reg, exp, upd, whois_raw, registrant_org = get_domain_whois(domain)
         result["registered_on"], result["expires_on"], result["last_updated_on"] = reg, exp, upd
         raw_intel_dict["WHOIS"] = whois_raw
-        actual_org_found = registrant_org if registrant_org and registrant_org != "N/A" else "N/A"
+        actual_org_found = registrant_org if registrant_org != "N/A" else "N/A"
     try:
         geo_req = requests.get(f"http://ip-api.com/json/{ip}?fields=status,country,city,org,as,isp,hosting,proxy", timeout=3)
         if geo_req.status_code == 200:
             geo_data = geo_req.json()
             if geo_data.get("status") == "success":
                 result["location"] = f"{geo_data.get('city')}, {geo_data.get('country')}"
-                result["legal_name"] = geo_data.get("org") or geo_data.get("isp", "Unknown")
+                result["legal_name"] = geo_data.get("org") or "Unknown"
                 result["provider"] = geo_data.get("as") or "Unknown"
-                result["ip_type"] = "Cloud" if geo_data.get("hosting") else "VPN" if geo_data.get("proxy") else "Business/Residential"
-                raw_intel_dict["Network (ip-api)"] = {"ISP": result["legal_name"], "Is Cloud": geo_data.get("hosting")}
+                result["ip_type"] = "Cloud" if geo_data.get("hosting") else "VPN" if geo_data.get("proxy") else "Business"
+                raw_intel_dict["Network"] = {"ISP": result["legal_name"], "Type": result["ip_type"]}
     except: pass
     try:
         obj = IPWhois(ip)
         rdap = obj.lookup_rdap(depth=1)
         rdap_org = rdap.get('network', {}).get('name', '')
-        if rdap_org: result["legal_name"] = rdap_org
-        raw_intel_dict["Infrastructure (RDAP)"] = {"Registrant": rdap_org, "CIDR": rdap.get('network', {}).get('cidr')}
-    except: pass
+        raw_intel_dict["Infrastructure"] = {"RDAP Org": rdap_org, "CIDR": rdap.get('network', {}).get('cidr')}
+    except: rdap_org = "N/A"
     brand = get_brand_intelligence(domain)
-    
-    # Internal HQ Lookup
-    internal_hq = "N/A"
-    temp_company = brand.get("name") or actual_org_found or result["legal_name"]
-    if temp_company and temp_company != "N/A":
-        internal_hq = query_wikidata(temp_company) or "N/A"
-        if internal_hq == "N/A":
-            try:
-                pdb_req = requests.get(f"https://www.peeringdb.com/api/net?name__contains={temp_company}", timeout=3)
-                if pdb_req.status_code == 200:
-                    data = pdb_req.json().get('data', [])
-                    if data: internal_hq = f"{data[0].get('city')}, {data[0].get('country')}"
-            except: pass
-    result["corporate_hq"] = internal_hq
-
     if config and config['openrouter_key']:
         ai_name, ai_hq, ai_reason = call_openrouter(config, {
-            "domain": domain, "ip": ip, "infra": result["legal_name"],
+            "domain": domain, "ip": ip, "infra": rdap_org,
             "network": result["provider"], "brand": brand.get("name", "N/A"),
             "whois_org": actual_org_found,
-            "internal_hq": internal_hq,
             "scraped_content": f"{scraped['meta']} | {scraped['text']}"
         })
         if ai_name:
-            result["company"] = ai_name
-            if ai_hq: result["corporate_hq"] = ai_hq
-            result["ai_reasoning"] = ai_reason
-            result["confidence_score"] = 100
+            result["company"], result["corporate_hq"], result["ai_reasoning"], result["confidence_score"] = ai_name, ai_hq or "N/A", ai_reason, 100
         else:
-            result["ai_reasoning"] = ai_reason
-            result["company"] = brand.get("name") or (actual_org_found if actual_org_found != "N/A" else result["legal_name"])
-            result["confidence_score"] = 80
+            result["company"], result["ai_reasoning"], result["confidence_score"] = brand.get("name") or actual_org_found or result["legal_name"], ai_reason, 70
     else:
-        result["company"] = brand.get("name") or (actual_org_found if actual_org_found != "N/A" else result["legal_name"])
-        result["confidence_score"] = 70
-
+        result["company"], result["ai_reasoning"], result["confidence_score"] = brand.get("name") or actual_org_found or result["legal_name"], "No API Key.", 50
     result["raw_intel"] = json.dumps(raw_intel_dict)
     return result
 
@@ -300,46 +253,43 @@ def check_target(ip, domain=None):
 def index():
     if request.method == 'POST':
         target_input = request.form['target'].strip()
-        if not target_input: flash('Target required!')
-        else:
+        if target_input:
             ip_address, domain = resolve_domain(target_input)
-            if not ip_address: flash(f'Could not resolve: {target_input}')
-            else:
+            if ip_address:
                 conn = get_db_connection()
                 try:
-                    conn.execute('INSERT INTO targets (domain, ip_address, company, legal_name, last_fetched) VALUES (?, ?, ?, ?, ?)',
-                                 (domain, ip_address, "Pending", "Pending", "Never"))
+                    conn.execute('INSERT INTO targets (domain, ip_address, company, last_fetched) VALUES (?, ?, ?, ?)',
+                                 (domain, ip_address, "Pending", "Never"))
                     conn.commit()
                     return redirect(url_for('results'))
-                except sqlite3.IntegrityError: flash('Target exists.')
+                except sqlite3.IntegrityError: flash('Exists.')
                 finally: conn.close()
+            else: flash('Unresolved.')
     return render_template('index.html')
 
 @app.route('/upload_csv', methods=['POST'])
 def upload_csv():
-    if 'csv_file' not in request.files: return redirect(url_for('index'))
-    file = request.files['csv_file']
-    if file.filename == '': return redirect(url_for('index'))
-    if file and file.filename.endswith('.csv'):
-        stream = io.StringIO(file.stream.read().decode("UTF8"), newline=None)
-        csv_input = csv.reader(stream)
-        conn = get_db_connection()
-        added_count = 0
-        for row in csv_input:
-            if not row: continue
-            target_input = row[0].strip()
-            if target_input.lower() in ['ip', 'ip_address', 'address', 'domain', 'url']: continue
-            ip_address, domain = resolve_domain(target_input)
-            if ip_address:
-                try:
-                    conn.execute('INSERT INTO targets (domain, ip_address, company, legal_name, last_fetched) VALUES (?, ?, ?, ?, ?)',
-                                 (domain, ip_address, "Pending", "Pending", "Never"))
-                    added_count += 1
-                except: pass
-        conn.commit()
-        conn.close()
-        flash(f'Processed {added_count} targets!')
-        return redirect(url_for('results'))
+    if 'csv_file' in request.files:
+        file = request.files['csv_file']
+        if file.filename.endswith('.csv'):
+            stream = io.StringIO(file.stream.read().decode("UTF8"), newline=None)
+            csv_input = csv.reader(stream)
+            conn = get_db_connection()
+            added = 0
+            for row in csv_input:
+                if not row: continue
+                target_input = row[0].strip()
+                if target_input.lower() in ['ip', 'domain', 'url']: continue
+                ip, domain = resolve_domain(target_input)
+                if ip:
+                    try:
+                        conn.execute('INSERT INTO targets (domain, ip_address, company, last_fetched) VALUES (?, ?, ?, ?)', (domain, ip, "Pending", "Never"))
+                        added += 1
+                    except: pass
+            conn.commit()
+            conn.close()
+            flash(f'Added {added} targets.')
+            return redirect(url_for('results'))
     return redirect(url_for('index'))
 
 @app.route('/results')
@@ -370,11 +320,9 @@ def fetch_ips():
 def settings():
     conn = get_db_connection()
     if request.method == 'POST':
-        key = request.form['openrouter_key'].strip()
-        prompt = request.form['ai_prompt'].strip()
-        conn.execute('UPDATE config SET openrouter_key = ?, ai_prompt = ? WHERE id = 1', (key, prompt))
+        conn.execute('UPDATE config SET openrouter_key = ?, ai_prompt = ? WHERE id = 1', (request.form['openrouter_key'].strip(), request.form['ai_prompt'].strip()))
         conn.commit()
-        flash('Settings updated!')
+        flash('Saved!')
     config = conn.execute('SELECT * FROM config WHERE id = 1').fetchone()
     conn.close()
     return render_template('settings.html', config=config)
@@ -394,8 +342,8 @@ def export_csv():
     conn.close()
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(['Domain', 'IP', 'Company', 'HQ', 'AI Reasoning', 'Confidence'])
-    for r in targets: writer.writerow([r['domain'], r['ip_address'], r['company'], r['corporate_hq'], r['ai_reasoning'], r['confidence_score']])
+    writer.writerow(['Domain', 'IP', 'Company', 'HQ', 'Reasoning'])
+    for r in targets: writer.writerow([r['domain'], r['ip_address'], r['company'], r['corporate_hq'], r['ai_reasoning']])
     return Response(output.getvalue(), mimetype="text/csv", headers={"Content-disposition": "attachment; filename=tracxn_osit.csv"})
 
 if __name__ == '__main__':
