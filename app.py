@@ -8,6 +8,7 @@ import io
 import json
 from datetime import datetime
 from ipwhois import IPWhois
+import whois
 
 app = Flask(__name__)
 app.secret_key = 'super_secret_tracker_key_for_flash_messages'
@@ -29,6 +30,9 @@ def init_db():
             domains_associated TEXT,
             ip_type TEXT,
             confidence_score INTEGER,
+            registered_on TEXT,
+            expires_on TEXT,
+            last_updated_on TEXT,
             last_fetched TEXT
         )
     ''')
@@ -43,27 +47,46 @@ def get_db_connection():
 def resolve_domain(target):
     """Resolve domain to IP or return target if already IP"""
     target = target.strip().lower()
-    # Remove protocol if present
     if "://" in target:
         target = target.split("://")[1]
-    # Remove path if present
     if "/" in target:
         target = target.split("/")[0]
         
     try:
-        # Check if it's already an IP
         socket.inet_aton(target)
         return target, None
     except socket.error:
-        # It's a domain, try to resolve
         try:
             ip = socket.gethostbyname(target)
             return ip, target
         except:
             return None, target
 
+def get_domain_whois(domain_name):
+    """Fetch Domain WHOIS dates (Registered, Expires, Updated)"""
+    if not domain_name:
+        return "N/A", "N/A", "N/A"
+    
+    try:
+        w = whois.whois(domain_name)
+        
+        def format_date(d):
+            if isinstance(d, list):
+                d = d[0]
+            if isinstance(d, datetime):
+                return d.strftime("%Y-%m-%d")
+            return str(d)
+
+        registered = format_date(w.creation_date) if w.creation_date else "N/A"
+        expires = format_date(w.expiration_date) if w.expiration_date else "N/A"
+        updated = format_date(w.updated_date) if w.updated_date else "N/A"
+        
+        return registered, expires, updated
+    except:
+        return "N/A", "N/A", "N/A"
+
 def query_wikidata(company_name):
-    """Fetch corporate HQ from Wikidata (Unlimited/Free)"""
+    """Fetch corporate HQ from Wikidata"""
     try:
         query = f"""
         SELECT ?item ?itemLabel ?hqLabel WHERE {{
@@ -83,7 +106,7 @@ def query_wikidata(company_name):
         pass
     return None
 
-def check_target(ip):
+def check_target(ip, domain=None):
     result = {
         "company": "Unknown",
         "legal_name": "N/A",
@@ -93,10 +116,20 @@ def check_target(ip):
         "domains_associated": "N/A",
         "ip_type": "Unknown",
         "confidence_score": 0,
+        "registered_on": "N/A",
+        "expires_on": "N/A",
+        "last_updated_on": "N/A",
         "last_fetched": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }
 
     agreement_points = 0
+
+    # Domain WHOIS Dates
+    if domain:
+        reg, exp, upd = get_domain_whois(domain)
+        result["registered_on"] = reg
+        result["expires_on"] = exp
+        result["last_updated_on"] = upd
 
     # Source 1: ip-api.com
     try:
@@ -182,9 +215,9 @@ def index():
                 conn = get_db_connection()
                 try:
                     conn.execute('''
-                        INSERT INTO targets (domain, company, legal_name, corporate_hq, ip_address, location, provider, domains_associated, ip_type, confidence_score, last_fetched) 
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                        (domain, "Pending", "Pending", "Pending", ip_address, "Pending", "Pending", "Pending Fetch", "Pending", 0, "Never")
+                        INSERT INTO targets (domain, company, legal_name, corporate_hq, ip_address, location, provider, domains_associated, ip_type, confidence_score, registered_on, expires_on, last_updated_on, last_fetched) 
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                        (domain, "Pending", "Pending", "Pending", ip_address, "Pending", "Pending", "Pending Fetch", "Pending", 0, "Pending", "Pending", "Pending", "Never")
                     )
                     conn.commit()
                     flash(f'Target successfully added: {ip_address}')
@@ -218,9 +251,9 @@ def upload_csv():
             if ip_address:
                 try:
                     conn.execute('''
-                        INSERT INTO targets (domain, company, legal_name, corporate_hq, ip_address, location, provider, domains_associated, ip_type, confidence_score, last_fetched) 
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                        (domain, "Pending", "Pending", "Pending", ip_address, "Pending", "Pending", "Pending Fetch", "Pending", 0, "Never")
+                        INSERT INTO targets (domain, company, legal_name, corporate_hq, ip_address, location, provider, domains_associated, ip_type, confidence_score, registered_on, expires_on, last_updated_on, last_fetched) 
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                        (domain, "Pending", "Pending", "Pending", ip_address, "Pending", "Pending", "Pending Fetch", "Pending", 0, "Pending", "Pending", "Pending", "Never")
                     )
                     added_count += 1
                 except:
@@ -241,14 +274,14 @@ def results():
 @app.route('/fetch', methods=['POST'])
 def fetch_ips():
     conn = get_db_connection()
-    targets = conn.execute('SELECT id, ip_address FROM targets').fetchall()
+    targets = conn.execute('SELECT id, ip_address, domain FROM targets').fetchall()
     for target in targets:
-        res = check_target(target['ip_address'])
+        res = check_target(target['ip_address'], target['domain'])
         conn.execute('''
             UPDATE targets 
-            SET company = ?, legal_name = ?, corporate_hq = ?, location = ?, provider = ?, domains_associated = ?, ip_type = ?, confidence_score = ?, last_fetched = ? 
+            SET company = ?, legal_name = ?, corporate_hq = ?, location = ?, provider = ?, domains_associated = ?, ip_type = ?, confidence_score = ?, registered_on = ?, expires_on = ?, last_updated_on = ?, last_fetched = ? 
             WHERE id = ?''', 
-            (res['company'], res['legal_name'], res['corporate_hq'], res['location'], res['provider'], res['domains_associated'], res['ip_type'], res['confidence_score'], res['last_fetched'], target['id'])
+            (res['company'], res['legal_name'], res['corporate_hq'], res['location'], res['provider'], res['domains_associated'], res['ip_type'], res['confidence_score'], res['registered_on'], res['expires_on'], res['last_updated_on'], res['last_fetched'], target['id'])
         )
     conn.commit()
     conn.close()
@@ -269,9 +302,9 @@ def export_csv():
     conn.close()
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(['Domain', 'Company', 'IP Address', 'Confidence', 'Corporate HQ', 'Server Location', 'Type', 'Domains'])
+    writer.writerow(['Domain', 'Company', 'IP Address', 'Confidence', 'Corporate HQ', 'Registered On', 'Expires On', 'Last Updated', 'Server Location', 'Type', 'Domains'])
     for row in targets:
-        writer.writerow([row['domain'], row['company'], row['ip_address'], f"{row['confidence_score']}%", row['corporate_hq'], row['location'], row['ip_type'], row['domains_associated']])
+        writer.writerow([row['domain'], row['company'], row['ip_address'], f"{row['confidence_score']}%", row['corporate_hq'], row['registered_on'], row['expires_on'], row['last_updated_on'], row['location'], row['ip_type'], row['domains_associated']])
     return Response(output.getvalue(), mimetype="text/csv", headers={"Content-disposition": "attachment; filename=tracxn_osit_intel.csv"})
 
 if __name__ == '__main__':
