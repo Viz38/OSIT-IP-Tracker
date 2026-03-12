@@ -1,4 +1,4 @@
-# Detective Pradeep 🕵️
+# Tracxn OSIT 🕵️
 **(Advanced IP Intelligence & Consensus Tracker)**
 
 A powerful, standalone Python web application designed for high-accuracy IP reconnaissance and corporate intelligence. It uses a **Triple-Source Consensus Engine** to map IP addresses to their **Legal Company Identity**, **Corporate Headquarters**, **Network Type**, and **Passive DNS** with over 90% accuracy.
@@ -13,7 +13,7 @@ A powerful, standalone Python web application designed for high-accuracy IP reco
 - **No-Limit Architecture**: Optimized for high-volume research using unlimited/high-limit open APIs like Wikidata and RDAP.
 
 ## How It Works
-Detective Pradeep executes a multi-layered reconnaissance sweep for every target IP to ensure data integrity and accuracy.
+Tracxn OSIT executes a multi-layered reconnaissance sweep for every target IP to ensure data integrity and accuracy.
 
 ### 1. Infrastructure Layer (RDAP)
 The tool queries the **Registration Data Access Protocol (RDAP)** via the `ipwhois` library. This is a direct query to the Regional Internet Registries (RIRs) like **ARIN, RIPE, APNIC, or LACNIC**. This provides the most authoritative legal registrant name and address for the IP block.

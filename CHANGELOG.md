@@ -1,6 +1,16 @@
 # CHANGELOG
 All notable changes to this project are documented here.
 
+## [2026-03-12] Rebranding to Tracxn OSIT
+Files changed:
+- app.py
+- templates/layout.html
+- README.md
+Reason:
+Rebranded the application from "Detective Pradeep" to **Tracxn OSIT**.
+- Updated UI branding and titles.
+- Updated API User-Agent and export filenames.
+
 ## [2026-03-12] High-Accuracy Consensus Engine Upgrade
 Files changed:
 - app.py

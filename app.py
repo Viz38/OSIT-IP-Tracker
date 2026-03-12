@@ -50,7 +50,7 @@ def query_wikidata(company_name):
         }} LIMIT 1
         """
         url = "https://query.wikidata.org/sparql"
-        headers = {'User-Agent': 'DetectivePradeep/1.0 (https://github.com/Viz38/pradeepiptracker)'}
+        headers = {'User-Agent': 'TracxnOSIT/1.0 (https://github.com/Viz38/pradeepiptracker)'}
         resp = requests.get(url, params={'query': query, 'format': 'json'}, headers=headers, timeout=5)
         if resp.status_code == 200:
             data = resp.json().get('results', {}).get('bindings', [])
@@ -250,7 +250,7 @@ def export_csv():
     writer.writerow(['Company', 'IP Address', 'Confidence', 'Corporate HQ', 'Server Location', 'Type', 'Domains'])
     for row in targets:
         writer.writerow([row['company'], row['ip_address'], f"{row['confidence_score']}%", row['corporate_hq'], row['location'], row['ip_type'], row['domains_associated']])
-    return Response(output.getvalue(), mimetype="text/csv", headers={"Content-disposition": "attachment; filename=detective_pradeep_intel.csv"})
+    return Response(output.getvalue(), mimetype="text/csv", headers={"Content-disposition": "attachment; filename=tracxn_osit_intel.csv"})
 
 if __name__ == '__main__':
     init_db()
