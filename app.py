@@ -23,6 +23,7 @@ Data gathered:
 - Network Provider (ip-api): {network}
 - Brand Intelligence: {brand}
 - WHOIS Registrant: {whois_org}
+- Live Website Context (Scraped): {scraped_content}
 
 The infrastructure owner might be a CDN (like AWS, Cloudflare) or an ISP. Your goal is to identify the actual business or entity that is using this infrastructure.
 Return only a JSON object with two keys: "final_company" and "reasoning"."""
@@ -42,7 +43,7 @@ def init_db():
             provider TEXT,
             domains_associated TEXT,
             ip_type TEXT,
-            confidence_score INTEGER,
+            confidence_score INTEGER DEFAULT 0,
             registered_on TEXT,
             expires_on TEXT,
             last_updated_on TEXT,
@@ -88,6 +89,30 @@ def resolve_domain(target):
             return ip, target
         except:
             return None, target
+
+def get_live_context(domain):
+    """Scrape website meta tags and visible text for AI context"""
+    context = {"meta": "", "text": ""}
+    if not domain: return context
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        res = requests.get(f"https://{domain}", headers=headers, timeout=5)
+        soup = BeautifulSoup(res.text, 'html.parser')
+        
+        # Meta tags
+        meta_desc = soup.find('meta', attrs={'name': 'description'})
+        og_desc = soup.find('meta', property='og:description')
+        context["meta"] = (meta_desc['content'] if meta_desc else "") + " " + (og_desc['content'] if og_desc else "")
+        
+        # Visible text snippet
+        for script in soup(["script", "style"]):
+            script.extract()
+        text = soup.get_text()
+        lines = (line.strip() for line in text.splitlines())
+        chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+        context["text"] = " ".join(chunk for chunk in chunks if chunk)[:500] # First 500 chars
+    except: pass
+    return context
 
 def get_brand_intelligence(domain):
     brand_data = {"name": None, "source": "None"}
@@ -139,15 +164,22 @@ def get_domain_whois(domain_name):
 
 def call_openrouter(config, data):
     if not config or not config['openrouter_key']:
-        return None, "OpenRouter API Key not set."
-    prompt = config['ai_prompt'].format(
-        domain=data.get('domain', 'N/A'),
-        ip=data.get('ip', 'N/A'),
-        infra=data.get('infra', 'N/A'),
-        network=data.get('network', 'N/A'),
-        brand=data.get('brand', 'N/A'),
-        whois_org=data.get('whois_org', 'N/A')
-    )
+        return None, "OpenRouter API Key not configured in settings."
+    
+    # Enrich prompt with dynamic placeholders
+    try:
+        prompt = config['ai_prompt'].format(
+            domain=data.get('domain', 'N/A'),
+            ip=data.get('ip', 'N/A'),
+            infra=data.get('infra', 'N/A'),
+            network=data.get('network', 'N/A'),
+            brand=data.get('brand', 'N/A'),
+            whois_org=data.get('whois_org', 'N/A'),
+            scraped_content=data.get('scraped_content', 'N/A')
+        )
+    except Exception as e:
+        return None, f"Prompt formatting error: {str(e)}"
+    
     try:
         response = requests.post(
             url="https://openrouter.ai/api/v1/chat/completions",
@@ -155,23 +187,26 @@ def call_openrouter(config, data):
                 "Authorization": f"Bearer {config['openrouter_key']}",
                 "HTTP-Referer": "https://github.com/Viz38/pradeepiptracker",
                 "X-Title": "Tracxn OSIT",
+                "Content-Type": "application/json"
             },
             data=json.dumps({
-                "model": "openrouter/trinity-large-preview",
-                "messages": [{"role": "user", "content": prompt}]
+                "model": "arcee-ai/trinity-large-preview:free",
+                "messages": [{"role": "user", "content": prompt}],
+                "response_format": {"type": "json_object"}
             }),
-            timeout=10
+            timeout=15
         )
         if response.status_code == 200:
             content = response.json()['choices'][0]['message']['content']
             try:
-                if "```json" in content: content = content.split("```json")[1].split("```")[0].strip()
-                elif "```" in content: content = content.split("```")[1].split("```")[0].strip()
                 ai_res = json.loads(content)
                 return ai_res.get('final_company'), ai_res.get('reasoning')
-            except: return content, "Raw AI response returned."
-    except Exception as e: return None, f"AI Error: {str(e)}"
-    return None, "No response from AI."
+            except:
+                return content, "Model returned raw text instead of JSON."
+        else:
+            return None, f"OpenRouter Error {response.status_code}: {response.text}"
+    except Exception as e:
+        return None, f"AI Network Exception: {str(e)}"
 
 def check_target(ip, domain=None):
     config = get_config()
@@ -183,16 +218,15 @@ def check_target(ip, domain=None):
         "ai_reasoning": "N/A", "last_fetched": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }
     raw_intel_dict = {"WHOIS": {}, "Network (ip-api)": {}, "Infrastructure (RDAP)": {}}
-    agreement_points = 0
     actual_org_found = "N/A"
 
+    # Gather Data Points
+    scraped = get_live_context(domain)
     if domain:
         reg, exp, upd, whois_raw, registrant_org = get_domain_whois(domain)
         result["registered_on"], result["expires_on"], result["last_updated_on"] = reg, exp, upd
         raw_intel_dict["WHOIS"] = whois_raw
-        if registrant_org and registrant_org != "N/A" and "privacy" not in registrant_org.lower():
-            actual_org_found = registrant_org
-            agreement_points += 1
+        actual_org_found = registrant_org if registrant_org and registrant_org != "N/A" else "N/A"
 
     try:
         geo_req = requests.get(f"http://ip-api.com/json/{ip}?fields=status,country,city,org,as,isp,hosting,proxy", timeout=3)
@@ -210,31 +244,32 @@ def check_target(ip, domain=None):
         obj = IPWhois(ip)
         rdap = obj.lookup_rdap(depth=1)
         rdap_org = rdap.get('network', {}).get('name', '')
-        if rdap_org:
-            result["legal_name"] = rdap_org
-            if actual_org_found != "N/A" and (rdap_org.lower() in actual_org_found.lower() or actual_org_found.lower() in rdap_org.lower()):
-                agreement_points += 2
+        if rdap_org: result["legal_name"] = rdap_org
         raw_intel_dict["Infrastructure (RDAP)"] = {"Registrant": rdap_org, "CIDR": rdap.get('network', {}).get('cidr')}
     except: pass
 
     brand = get_brand_intelligence(domain)
-    if brand.get("name"):
-        result["company"] = brand["name"]
-        result["confidence_score"] = 99
-    else:
-        result["company"] = actual_org_found if actual_org_found != "N/A" else result["legal_name"]
-        result["confidence_score"] = 70 if agreement_points > 1 else 30
-
+    
+    # AI Verification Layer (Priority)
     if config and config['openrouter_key']:
         ai_name, ai_reason = call_openrouter(config, {
             "domain": domain, "ip": ip, "infra": result["legal_name"],
             "network": result["provider"], "brand": brand.get("name", "N/A"),
-            "whois_org": actual_org_found
+            "whois_org": actual_org_found,
+            "scraped_content": f"{scraped['meta']} | {scraped['text']}"
         })
         if ai_name:
             result["company"] = ai_name
             result["ai_reasoning"] = ai_reason
             result["confidence_score"] = 100
+        else:
+            result["ai_reasoning"] = ai_reason # Log error reasoning
+            # Fallback to standard logic if AI fails
+            result["company"] = brand.get("name") or (actual_org_found if actual_org_found != "N/A" else result["legal_name"])
+            result["confidence_score"] = 80
+    else:
+        result["company"] = brand.get("name") or (actual_org_found if actual_org_found != "N/A" else result["legal_name"])
+        result["confidence_score"] = 70
 
     result["raw_intel"] = json.dumps(raw_intel_dict)
     return result
@@ -250,8 +285,8 @@ def index():
             else:
                 conn = get_db_connection()
                 try:
-                    conn.execute('INSERT INTO targets (domain, ip_address, company, legal_name, last_fetched) VALUES (?, ?, ?, ?, ?)',
-                                 (domain, ip_address, "Pending", "Pending", "Never"))
+                    conn.execute('INSERT INTO targets (domain, ip_address, company, legal_name, confidence_score, last_fetched) VALUES (?, ?, ?, ?, ?, ?)',
+                                 (domain, ip_address, "Pending", "Pending", 0, "Never"))
                     conn.commit()
                     return redirect(url_for('results'))
                 except sqlite3.IntegrityError: flash('Target exists.')
@@ -275,8 +310,8 @@ def upload_csv():
             ip_address, domain = resolve_domain(target_input)
             if ip_address:
                 try:
-                    conn.execute('INSERT INTO targets (domain, ip_address, company, legal_name, last_fetched) VALUES (?, ?, ?, ?, ?)',
-                                 (domain, ip_address, "Pending", "Pending", "Never"))
+                    conn.execute('INSERT INTO targets (domain, ip_address, company, legal_name, confidence_score, last_fetched) VALUES (?, ?, ?, ?, ?, ?)',
+                                 (domain, ip_address, "Pending", "Pending", 0, "Never"))
                     added_count += 1
                 except: pass
         conn.commit()
